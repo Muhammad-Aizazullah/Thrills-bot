@@ -13,8 +13,9 @@ const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
 const ADMIN_NUMBER = process.env.ADMIN_NUMBER; 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 
+// Vercel k liye Google Auth ko Environment Variable se connect kiya ha
 const auth = new google.auth.GoogleAuth({
-    keyFile: 'credentials.json',
+    credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS),
     scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
 });
 
@@ -245,3 +246,6 @@ async function sendPriceRangeMenu(to, category, size) {
 app.listen(PORT, () => {
     console.log(`Server port ${PORT} par chal rha ha. Local test k liyay tayar ha.`);
 });
+
+// Vercel deployment k liye lazmi line
+module.exports = app;
