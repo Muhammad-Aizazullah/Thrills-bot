@@ -125,7 +125,24 @@ app.post('/webhook', async (req, res) => {
                 time: new Date().toLocaleString(),
                 details: session.customerDetails
             };
-            globalOrders.push(newOrder);
+            // server.js mein neeche ye function shamil karein
+async function saveOrderToSheet(order) {
+    try {
+        const client = await auth.getClient();
+        const sheets = google.sheets({ version: 'v4', auth: client });
+        const itemsString = order.items.map(i => `${i.item}(${i.size})`).join(', ');
+        
+        await sheets.spreadsheets.values.append({
+            spreadsheetId: SPREADSHEET_ID,
+            range: 'Orders!A:F',
+            valueInputOption: 'USER_ENTERED',
+            requestBody: { values: [[order.id, order.phone, itemsString, order.total, order.details, order.time]] }
+        });
+    } catch (error) { console.error("Order Save Error:", error); }
+}
+
+// Webhook k andar jahan globalOrders.push(newOrder) ha, wahan ye laga dein:
+await saveOrderToSheet(newOrder);
 
             await sendText(senderPhone, "Aap ka order mukammal tor par confirm ho gaya ha! Admin jald he isay verify kar k dispatch kar de ga. Thrills say shopping karne ka bohat shukriya!");
             
