@@ -63,6 +63,7 @@ function renderOrders() {
 
     filtered.forEach(order => {
         let itemsHtml = order.items.map(i => `${i.item} (Size: ${i.size}) - Rs ${i.price}`).join('<br>');
+        let customerAddress = order.details ? order.details : 'Not provided';
         
         const card = document.createElement('div');
         card.className = 'orderCard';
@@ -71,6 +72,7 @@ function renderOrders() {
                 <h4>Order ID: #${order.id}</h4>
                 <p><strong>Phone:</strong> ${order.phone}</p>
                 <p><strong>Date:</strong> ${order.time}</p>
+                <p><strong>Customer Details:</strong> ${customerAddress}</p>
                 <div class="orderItems">${itemsHtml}</div>
                 <p><strong>Total Bill:</strong> Rs ${order.total}</p>
             </div>
