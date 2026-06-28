@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Thrills Premium Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <div id="loginScreen">
+        <div class="loginBox">
+            <h2>Admin Login</h2>
+            <input type="password" id="adminPassword" placeholder="Enter Password">
+            <button onclick="checkPassword()">Login</button>
+        </div>
+    </div>
+
+    <div id="dashboard">
+        <div class="header">
+            <h2>Thrills Admin Panel</h2>
+            <button class="logout-btn" onclick="logout()">Logout</button>
+        </div>
+
+        <div class="tabs">
+            <div class="tab active" onclick="switchTab('ordersTab', this)">Manage Orders</div>
+            <div class="tab" onclick="switchTab('addProductTab', this)">Add New Product</div>
+        </div>
+
+        <div id="ordersTab" class="tab-content active-content">
+            <div class="filter-buttons">
+                <button class="filter-btn active-filter" onclick="filterOrders('New')">New Orders</button>
+                <button class="filter-btn" onclick="filterOrders('Confirmed')">Confirmed</button>
+                <button class="filter-btn" onclick="filterOrders('Dispatched')">Dispatched</button>
+                <button class="filter-btn" onclick="filterOrders('Completed')">Completed</button>
+            </div>
+            <div class="orderList" id="ordersContainer"></div>
+        </div>
+
+        <div id="addProductTab" class="tab-content">
+            <div class="form-container">
+                <h3>Add Product to Store</h3>
+                <input type="text" id="itemName" placeholder="Item Name (e.g., Shirt)">
+                <input type="text" id="itemSize" placeholder="Size (e.g., Small, Medium)">
+                <input type="number" id="itemPrice" placeholder="Price (e.g., 1500)">
+                
+                <div class="upload-section">
+                    <label>Select Product Video:</label>
+                    <input type="file" id="videoFile" accept="video/mp4,video/x-m4v,video/*">
+                </div>
+
+                <button id="uploadBtn" onclick="uploadAndSaveProduct()">Upload & Save Product</button>
+                <p id="uploadStatus"></p>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

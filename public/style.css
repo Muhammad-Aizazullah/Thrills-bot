@@ -1,0 +1,37 @@
+body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f8f9fa; margin: 0; padding: 0; color: #333; }
+#loginScreen { display: flex; height: 100vh; justify-content: center; align-items: center; background-color: #1a1a2e; }
+.loginBox { background: white; padding: 40px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.3); text-align: center; width: 300px; }
+.loginBox h2 { margin-top: 0; color: #1a1a2e; }
+.loginBox input { padding: 12px; width: 90%; margin-top: 15px; border: 1px solid #ddd; border-radius: 6px; outline: none; }
+.loginBox button { margin-top: 20px; padding: 12px 20px; width: 100%; background: #0f3460; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.3s; }
+.loginBox button:hover { background: #e94560; }
+
+#dashboard { display: none; padding: 20px; max-width: 1200px; margin: auto; }
+.header { display: flex; justify-content: space-between; align-items: center; background: #1a1a2e; color: white; padding: 15px 30px; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+.header h2 { margin: 0; }
+.logout-btn { padding: 8px 15px; background: #e94560; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; }
+
+.tabs { display: flex; margin-top: 20px; gap: 10px; border-bottom: 2px solid #ddd; padding-bottom: 10px; }
+.tab { padding: 10px 25px; cursor: pointer; border-radius: 5px; font-weight: bold; color: #666; transition: 0.3s; }
+.tab.active { background: #0f3460; color: white; }
+
+.tab-content { display: none; margin-top: 20px; }
+.tab-content.active-content { display: block; }
+
+.filter-buttons { margin-bottom: 20px; display: flex; gap: 10px; }
+.filter-btn { padding: 8px 15px; border: 1px solid #0f3460; background: transparent; color: #0f3460; border-radius: 5px; cursor: pointer; font-weight: bold; }
+.filter-btn.active-filter { background: #0f3460; color: white; }
+
+.orderList { display: grid; gap: 15px; }
+.orderCard { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); display: flex; justify-content: space-between; align-items: center; }
+.orderDetails h4 { margin: 0 0 10px 0; color: #1a1a2e; }
+.orderDetails p { margin: 5px 0; color: #555; font-size: 14px; }
+.orderItems { background: #f1f1f1; padding: 10px; border-radius: 6px; margin: 10px 0; font-family: monospace; }
+.orderActions select { padding: 10px; border-radius: 5px; border: 1px solid #ccc; margin-right: 10px; outline: none; }
+.orderActions button { padding: 10px 15px; background: #0f3460; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; }
+
+.form-container { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); max-width: 500px; }
+.form-container input[type="text"], .form-container input[type="number"] { width: 90%; padding: 12px; margin-bottom: 15px; border: 1px solid #ccc; border-radius: 6px; display: block; }
+.upload-section { margin-bottom: 20px; padding: 15px; border: 2px dashed #ccc; border-radius: 6px; background: #f9f9f9; }
+#uploadBtn { width: 95%; padding: 12px; background: #27ae60; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 16px; }
+#uploadStatus { margin-top: 15px; font-weight: bold; color: #0f3460; }

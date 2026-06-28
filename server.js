@@ -1,247 +1,235 @@
 const express = require('express');
 const bodyParser = require('body-parser');
 const axios = require('axios');
+const path = require('path');
 const { google } = require('googleapis');
 require('dotenv').config();
 
 const app = express();
 app.use(bodyParser.json());
+app.use(express.static(path.join(__dirname, 'public')));
 
 const PORT = process.env.PORT || 3000;
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
-const ADMIN_NUMBER = process.env.ADMIN_NUMBER; 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 
+const userCarts = {}; 
+let globalOrders = [];
+let orderIdCounter = 1001;
+
 const auth = new google.auth.GoogleAuth({
-    keyFile: 'credentials.json',
-    scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
+    credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS),
+    scopes: ['https://www.googleapis.com/auth/spreadsheets'], 
 });
 
-// Drive link ko direct media link mein convert karnay ka function
-function makeDirectDriveLink(url) {
-    const match = url.match(/\/d\/(.+?)\//);
-    if (match && match[1]) {
-        return `https://drive.google.com/uc?export=download&id=${match[1]}`;
-    }
-    return url;
+async function getSheetData() {
+    const client = await auth.getClient();
+    const sheets = google.sheets({ version: 'v4', auth: client });
+    const response = await sheets.spreadsheets.values.get({
+        spreadsheetId: SPREADSHEET_ID,
+        range: 'Sheet1!A2:D100', 
+    });
+    return response.data.values || [];
 }
 
-// Google Sheet se videos nikalne ka function
-async function getVideosFromSheet(category, size, priceRange) {
+// API: Frontend ko orders dena
+app.get('/api/orders', (req, res) => res.json(globalOrders));
+
+// API: Order ka status update karna
+app.post('/api/orders/update', (req, res) => {
+    const { id, status } = req.body;
+    const orderIndex = globalOrders.findIndex(o => o.id === id);
+    if (orderIndex > -1) {
+        globalOrders[orderIndex].status = status;
+        res.json({ success: true });
+    } else {
+        res.status(404).json({ success: false });
+    }
+});
+
+// API: Naya product Google Sheet mein add karna
+app.post('/api/add-product', async (req, res) => {
     try {
+        const { name, size, price, videoUrl } = req.body;
         const client = await auth.getClient();
         const sheets = google.sheets({ version: 'v4', auth: client });
-        const response = await sheets.spreadsheets.values.get({
+        
+        await sheets.spreadsheets.values.append({
             spreadsheetId: SPREADSHEET_ID,
-            range: 'Sheet1!A2:E100', // Columns: Category, Size, PriceRange, VideoUrl, Price
+            range: 'Sheet1!A:D',
+            valueInputOption: 'USER_ENTERED',
+            requestBody: {
+                values: [[name, size, price, videoUrl]]
+            }
         });
         
-        const rows = response.data.values;
-        if (!rows || rows.length === 0) return [];
-        
-        let matchedVideos = [];
-        for (let row of rows) {
-            const rowCat = row[0] ? row[0].toLowerCase() : '';
-            const rowSize = row[1] ? row[1].toLowerCase() : '';
-            const rowPriceRange = row[2] ? row[2].toLowerCase() : '';
-            const rowVideoUrl = row[3] ? row[3] : '';
-            const rowPrice = row[4] ? row[4] : '';
-
-            if (rowCat === category && rowSize === size && (priceRange === 'all' || rowPriceRange === priceRange)) {
-                matchedVideos.push({
-                    url: makeDirectDriveLink(rowVideoUrl),
-                    price: rowPrice
-                });
-            }
-        }
-        return matchedVideos;
+        res.json({ success: true });
     } catch (error) {
         console.error("Sheet Error:", error);
-        return [];
+        res.status(500).json({ success: false, error: error.message });
     }
-}
+});
 
+// WhatsApp Webhook setup
 app.get('/webhook', (req, res) => {
-    const verifyToken = process.env.VERIFY_TOKEN;
-    const mode = req.query['hub.mode'];
-    const token = req.query['hub.verify_token'];
-    const challenge = req.query['hub.challenge'];
-
-    if (mode && token) {
-        if (mode === 'subscribe' && token === verifyToken) {
-            res.status(200).send(challenge);
-        } else {
-            res.sendStatus(403);
-        }
+    if (req.query['hub.mode'] === 'subscribe' && req.query['hub.verify_token'] === process.env.VERIFY_TOKEN) {
+        res.status(200).send(req.query['hub.challenge']);
+    } else {
+        res.sendStatus(403);
     }
 });
 
 app.post('/webhook', async (req, res) => {
-    if (req.body.object) {
-        if (req.body.entry && req.body.entry[0].changes && req.body.entry[0].changes[0].value.messages && req.body.entry[0].changes[0].value.messages[0]) {
+    if (!req.body.object || !req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0]) return res.sendStatus(200);
+    
+    const message = req.body.entry[0].changes[0].value.messages[0];
+    const senderPhone = message.from;
+    
+    if (!userCarts[senderPhone]) userCarts[senderPhone] = [];
+
+    if (message.type === 'image') {
+        const cart = userCarts[senderPhone];
+        if (cart.length === 0) {
+            await sendText(senderPhone, "Aap ka cart khali ha. Pehlay koi item select karein.");
+            return res.sendStatus(200);
+        }
+
+        let totalBill = cart.reduce((sum, item) => sum + parseInt(item.price), 0);
+        
+        const newOrder = {
+            id: orderIdCounter++,
+            phone: senderPhone,
+            items: [...cart],
+            total: totalBill,
+            status: 'New',
+            time: new Date().toLocaleString()
+        };
+        globalOrders.push(newOrder);
+
+        await sendText(senderPhone, "Aap ka payment screenshot aur order receive ho gaya ha! Hum jald he isay confirm kar k dispatch kar dein gay. Shukriya!");
+        
+        userCarts[senderPhone] = []; 
+        return res.sendStatus(200);
+    }
+
+    if (message.type === 'text') {
+        await sendDynamicMainMenu(senderPhone);
+        return res.sendStatus(200);
+    }
+
+    if (message.type === 'interactive') {
+        const replyId = message.interactive.list_reply?.id || message.interactive.button_reply?.id;
+
+        if (replyId.startsWith('cat_')) {
+            const category = replyId.split('_')[1];
+            await sendDynamicSizes(senderPhone, category);
+        } 
+        else if (replyId.startsWith('size_')) {
+            const parts = replyId.split('_');
+            const category = parts[1];
+            const size = parts[2];
             
-            const message = req.body.entry[0].changes[0].value.messages[0];
-            const senderPhone = message.from;
-
-            if (message.type === 'image') {
-                await sendText(senderPhone, "Bohat khoob! Aap ki pasandida item select ho gai ha. Kuch he dair mein aap ko final bill aur account details mil jayen gi. Payment 100% advance ha. Shukriya!");
-                await sendText(ADMIN_NUMBER, `New Order Alert! Is number say screenshot aya ha: ${senderPhone}. Fauran check krien.`);
-                return res.sendStatus(200);
-            }
-
-            if (message.type === 'text') {
-                const textBody = message.text.body.toLowerCase();
-
-                if (textBody.includes('shirt')) {
-                    await sendSizeMenu(senderPhone, 'shirt');
-                } else if (textBody.includes('trouser')) {
-                    await sendSizeMenu(senderPhone, 'trouser');
-                } else if (textBody.includes('pant')) {
-                    await sendSizeMenu(senderPhone, 'pant');
-                } else if (textBody.includes('discount') || textBody.includes('kam')) {
-                    await sendText(senderPhone, "Maazrat, humari prices bilkul fixed hein aur hum koi discount offer nahi kartay. Humari policy sirf Advance Payment ki ha.");
-                } else {
-                    await sendMainMenu(senderPhone);
-                }
-                return res.sendStatus(200);
-            }
-
-            if (message.type === 'interactive') {
-                const interactiveObj = message.interactive.button_reply || message.interactive.list_reply;
-                const replyId = interactiveObj.id;
-
-                if (replyId.startsWith('cat_')) {
-                    const category = replyId.split('_')[1]; 
-                    await sendSizeMenu(senderPhone, category);
-                }
-                else if (replyId.startsWith('size_')) {
-                    const parts = replyId.split('_');
-                    const category = parts[1];
-                    const size = parts[2];
-                    await sendPriceRangeMenu(senderPhone, category, size);
-                }
-                else if (replyId.startsWith('price_')) {
-                    const parts = replyId.split('_');
-                    const category = parts[1];
-                    const size = parts[2];
-                    const range = parts[3];
-
-                    await sendText(senderPhone, "Great! Mein Thrills k database say aap ki pasandida items nikal raha hon. Thora intezar krien...");
-                    
-                    const videos = await getVideosFromSheet(category, size, range);
-
-                    if (videos.length > 0) {
-                        for (let vid of videos) {
-                            await sendMediaVideo(senderPhone, vid.url, `Price Rs ${vid.price}\nJo pasand aaye uska Screenshot (SS) lay kar bhejein.`);
-                        }
-                    } else {
-                        await sendText(senderPhone, "Maazrat, is waqt is selection mein koi video mojoud nahi ha. Baraye meharbani koi aur option try krien.");
-                    }
-                }
-                return res.sendStatus(200);
+            const rows = await getSheetData();
+            const matchedRow = rows.find(r => r[0] === category && r[1] === size);
+            
+            if (matchedRow) {
+                const price = matchedRow[2];
+                const videoUrl = matchedRow[3];
+                
+                userCarts[senderPhone].push({ item: category, size: size, price: price });
+                
+                await sendText(senderPhone, `Item: ${category}\nSize: ${size}\nPrice: Rs ${price}\n\nVideo load ho rahi ha...`);
+                await sendVideo(senderPhone, videoUrl);
+                await sendCheckoutMenu(senderPhone);
             }
         }
-        res.sendStatus(200);
-    } else {
-        res.sendStatus(404);
+        else if (replyId === 'checkout') {
+            const cart = userCarts[senderPhone];
+            if (cart.length === 0) return res.sendStatus(200);
+
+            let billText = "Aap Ka Total Bill:\n\n";
+            let total = 0;
+            
+            cart.forEach((c, index) => {
+                billText += `${index + 1}. Item: ${c.item}\n   Size: ${c.size}\n   Price: Rs ${c.price}\n\n`;
+                total += parseInt(c.price);
+            });
+            
+            billText += `Total Items: ${cart.length}\nTotal Bill: Rs ${total}\n\nU can pay via Easypaisa or Jazzcash on this number 03xxxxxxxxx and then send the screenshot of your payment along with your full address here.`;
+            
+            await sendText(senderPhone, billText);
+        }
+        else if (replyId === 'add_more') {
+            await sendDynamicMainMenu(senderPhone);
+        }
     }
+    res.sendStatus(200);
 });
 
-async function sendText(to, textContent) {
-    try {
-        await axios.post(`https://graph.facebook.com/v17.0/${PHONE_NUMBER_ID}/messages`, {
-            messaging_product: "whatsapp",
-            to: to,
-            text: { body: textContent }
-        }, { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` } });
-    } catch (error) { console.error("Text Error:", error.message); }
+async function sendDynamicMainMenu(to) {
+    const rows = await getSheetData();
+    const categories = [...new Set(rows.map(r => r[0]))].filter(Boolean);
+    
+    if (categories.length === 0) return sendText(to, "Store mein abhi koi items nahi hain.");
+
+    const listRows = categories.map(cat => ({ id: `cat_${cat}`, title: cat }));
+    
+    await axios.post(`https://graph.facebook.com/v17.0/${PHONE_NUMBER_ID}/messages`, {
+        messaging_product: "whatsapp", to: to, type: "interactive",
+        interactive: {
+            type: "list", header: { type: "text", text: "Welcome!" },
+            body: { text: "Kia dekhna pasand karein gay?" },
+            footer: { text: "Select an option" },
+            action: { button: "Items Dekhein", sections: [{ title: "Categories", rows: listRows }] }
+        }
+    }, { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` } });
 }
 
-async function sendMediaVideo(to, videoUrl, captionText) {
-    try {
-        await axios.post(`https://graph.facebook.com/v17.0/${PHONE_NUMBER_ID}/messages`, {
-            messaging_product: "whatsapp",
-            to: to,
-            type: "video",
-            video: { link: videoUrl, caption: captionText }
-        }, { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` } });
-    } catch (error) { 
-        console.error("Video Bhejnay Mein Masla:", error.response ? error.response.data : error.message);
-        await sendText(to, `Video Link: ${videoUrl}\n\n${captionText}`);
-    }
+async function sendDynamicSizes(to, category) {
+    const rows = await getSheetData();
+    const sizes = [...new Set(rows.filter(r => r[0] === category).map(r => r[1]))].filter(Boolean);
+    
+    const listRows = sizes.map(size => ({ id: `size_${category}_${size}`, title: size }));
+
+    await axios.post(`https://graph.facebook.com/v17.0/${PHONE_NUMBER_ID}/messages`, {
+        messaging_product: "whatsapp", to: to, type: "interactive",
+        interactive: {
+            type: "list", header: { type: "text", text: "Select Size" },
+            body: { text: `Apna size muntakhib karein:` },
+            footer: { text: "Store" },
+            action: { button: "Sizes", sections: [{ title: "Available Sizes", rows: listRows }] }
+        }
+    }, { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` } });
 }
 
-async function sendMainMenu(to) {
-    try {
-        await axios.post(`https://graph.facebook.com/v17.0/${PHONE_NUMBER_ID}/messages`, {
-            messaging_product: "whatsapp",
-            to: to,
-            type: "interactive",
-            interactive: {
-                type: "button",
-                body: { text: "Thrills mein Khush Aamdeed! Kia dekhna pasand karein gay?" },
-                action: {
-                    buttons: [
-                        { type: "reply", reply: { id: "cat_shirt", title: "Shirts" } },
-                        { type: "reply", reply: { id: "cat_trouser", title: "Trousers" } },
-                        { type: "reply", reply: { id: "cat_pant", title: "Pants" } }
-                    ]
-                }
+async function sendCheckoutMenu(to) {
+    await axios.post(`https://graph.facebook.com/v17.0/${PHONE_NUMBER_ID}/messages`, {
+        messaging_product: "whatsapp", to: to, type: "interactive",
+        interactive: {
+            type: "button", body: { text: "Kia aap mazeed items dekhna chahtay hain ya checkout karein gay?" },
+            action: {
+                buttons: [
+                    { type: "reply", reply: { id: "add_more", title: "Add More Items" } },
+                    { type: "reply", reply: { id: "checkout", title: "Checkout & Bill" } }
+                ]
             }
-        }, { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` } });
-    } catch (error) { console.error("Main Menu error:", error.message); }
+        }
+    }, { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` } });
 }
 
-async function sendSizeMenu(to, category) {
+async function sendVideo(to, url) {
     try {
         await axios.post(`https://graph.facebook.com/v17.0/${PHONE_NUMBER_ID}/messages`, {
-            messaging_product: "whatsapp",
-            to: to,
-            type: "interactive",
-            interactive: {
-                type: "list",
-                header: { type: "text", text: "Size Select Karein" },
-                body: { text: "Apna size muntakhib karein:" },
-                footer: { text: "Thrills Store" },
-                action: {
-                    button: "Sizes Dekhein",
-                    sections: [{
-                        title: "Available Sizes",
-                        rows: [
-                            { id: `size_${category}_small`, title: "Small (S)" },
-                            { id: `size_${category}_medium`, title: "Medium (M)" },
-                            { id: `size_${category}_large`, title: "Large (L)" },
-                            { id: `size_${category}_xl`, title: "Extra Large (XL)" }
-                        ]
-                    }]
-                }
-            }
+            messaging_product: "whatsapp", to: to, type: "video", video: { link: url }
         }, { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` } });
-    } catch (error) { console.error("Size Menu error:", error.message); }
+    } catch (e) { await sendText(to, `Video Link: ${url}`); }
 }
 
-async function sendPriceRangeMenu(to, category, size) {
-    try {
-        await axios.post(`https://graph.facebook.com/v17.0/${PHONE_NUMBER_ID}/messages`, {
-            messaging_product: "whatsapp",
-            to: to,
-            type: "interactive",
-            interactive: {
-                type: "button",
-                body: { text: "Thrills ki apni pasandida price range select krien:" },
-                action: {
-                    buttons: [
-                        { type: "reply", reply: { id: `price_${category}_${size}_under2000`, title: "Under 2000" } },
-                        { type: "reply", reply: { id: `price_${category}_${size}_2to5k`, title: "2000 to 5000" } },
-                        { type: "reply", reply: { id: `price_${category}_${size}_all`, title: "All Items" } }
-                    ]
-                }
-            }
-        }, { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` } });
-    } catch (error) { console.error("Price Menu error:", error.message); }
+async function sendText(to, text) {
+    await axios.post(`https://graph.facebook.com/v17.0/${PHONE_NUMBER_ID}/messages`, {
+        messaging_product: "whatsapp", to: to, text: { body: text }
+    }, { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` } });
 }
 
-app.listen(PORT, () => {
-    console.log(`Server port ${PORT} par chal rha ha. Local test k liyay tayar ha.`);
-});
+app.listen(PORT, () => console.log(`Server live on port ${PORT}`));
