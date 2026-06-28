@@ -1,7 +1,7 @@
 const APIURL = '/api/orders';
 const ADD_PRODUCT_URL = '/api/add-product';
 
-const CLOUD_NAME = 'dtvtc49co4'; 
+const CLOUD_NAME = 'dh4c49ca4'; 
 const UPLOAD_PRESET = 'Thrills'; 
 
 let allOrders = [];
