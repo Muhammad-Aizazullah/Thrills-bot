@@ -73,7 +73,6 @@ app.post('/api/add-product', async (req, res) => {
         
         res.json({ success: true });
     } catch (error) {
-        console.error("Sheet Append Error:", error);
         res.status(500).json({ success: false, error: error.message });
     }
 });
@@ -93,9 +92,28 @@ app.post('/webhook', async (req, res) => {
     const senderPhone = message.from;
     const session = getSession(senderPhone);
 
+    // Image Handle (Screenshots)
     if (message.type === 'image') {
-        if (session.step === 'checkout') {
-            let details = message.image.caption || session.customerDetails || 'Details not provided';
+        if (session.step === 'awaiting_ss') {
+            session.step = 'awaiting_address';
+            await sendText(senderPhone, "Bohat shukriya! Aap ka payment screenshot receive ho gaya ha. Ab kindly apna Full Name aur mukammal Address yahan text kar k bhejein ta k order dispatch kiya ja sakay.");
+        } 
+        else if (session.tempSelection) {
+            session.cart.push(session.tempSelection);
+            session.tempSelection = null;
+            session.step = 'cart_options';
+            await sendCheckoutMenu(senderPhone);
+        } else {
+            await sendText(senderPhone, "Pehlay menu say koi item select karein phir screenshot bhejein.");
+            await sendDynamicMainMenu(senderPhone);
+        }
+        return res.sendStatus(200);
+    }
+
+    // Text Handle (Greeting & Address)
+    if (message.type === 'text') {
+        if (session.step === 'awaiting_address') {
+            session.customerDetails = message.text.body;
             let totalBill = session.cart.reduce((sum, item) => sum + parseInt(item.price), 0);
             
             const newOrder = {
@@ -105,36 +123,21 @@ app.post('/webhook', async (req, res) => {
                 total: totalBill,
                 status: 'New',
                 time: new Date().toLocaleString(),
-                details: details
+                details: session.customerDetails
             };
             globalOrders.push(newOrder);
 
-            await sendText(senderPhone, "Bohat shukriya! Aap ka payment screenshot aur order details receive ho gai hain. Hum jald he aap ka order dispatch kar dein gay.");
-            sessions[senderPhone] = null; 
-        } else {
-            if (session.tempSelection) {
-                session.cart.push(session.tempSelection);
-                session.tempSelection = null;
-                session.step = 'cart_options';
-                await sendCheckoutMenu(senderPhone);
-            } else {
-                await sendText(senderPhone, "Pehlay menu say koi item select karein phir screenshot bhejein.");
-                await sendDynamicMainMenu(senderPhone);
-            }
-        }
-        return res.sendStatus(200);
-    }
-
-    if (message.type === 'text') {
-        if (session.step === 'checkout') {
-            session.customerDetails = message.text.body;
-            await sendText(senderPhone, "Aap ki details save ho gai hain. Ab kindly payment ka screenshot isi chat mein bhejein ta k order final ho sakay.");
+            await sendText(senderPhone, "Aap ka order mukammal tor par confirm ho gaya ha! Admin jald he isay verify kar k dispatch kar de ga. Thrills say shopping karne ka bohat shukriya!");
+            
+            // Cart aur session clear kar dein order anay k baad
+            sessions[senderPhone] = { cart: [], tempSelection: null, step: 'start', customerDetails: '' };
         } else {
             await sendDynamicMainMenu(senderPhone);
         }
         return res.sendStatus(200);
     }
 
+    // Button / List Replies Handle
     if (message.type === 'interactive') {
         const interactiveObj = message.interactive.list_reply || message.interactive.button_reply;
         if (!interactiveObj) return res.sendStatus(200);
@@ -158,10 +161,15 @@ app.post('/webhook', async (req, res) => {
             const price = parts[3];
             
             const rows = await getSheetData();
-            const matchedRow = rows.find(r => r[0].trim() === category && r[1].trim() === size && r[2].trim() === price);
+            // Case-insensitive match ta k sizes/prices miss na hon
+            const matchedRow = rows.find(r => 
+                r[0] && r[0].toLowerCase().trim() === category.toLowerCase().trim() && 
+                r[1] && r[1].toLowerCase().trim() === size.toLowerCase().trim() && 
+                r[2] && r[2].toLowerCase().trim() === price.toLowerCase().trim()
+            );
             
             if (matchedRow) {
-                session.tempSelection = { item: category, size: size, price: price };
+                session.tempSelection = { item: matchedRow[0], size: matchedRow[1], price: matchedRow[2] };
                 session.step = 'viewing';
                 await sendVideo(senderPhone, matchedRow[3]);
             } else {
@@ -170,9 +178,12 @@ app.post('/webhook', async (req, res) => {
             }
         }
         else if (replyId === 'checkout') {
-            if (session.cart.length === 0) return res.sendStatus(200);
+            if (session.cart.length === 0) {
+                await sendText(senderPhone, "Aap ka cart khali ha.");
+                return res.sendStatus(200);
+            }
 
-            let billText = "Aap Ka Total Bill:\n\n";
+            let billText = "🛍️ *Aap Ka Total Bill* 🛍️\n\n";
             let total = 0;
             
             session.cart.forEach((c, index) => {
@@ -180,9 +191,9 @@ app.post('/webhook', async (req, res) => {
                 total += parseInt(c.price);
             });
             
-            billText += `Total Items: ${session.cart.length}\nTotal Bill: Rs ${total}\n\nEasypaisa Account: 03123123123\n\nKindly is number par payment kar k screenshot bhejein. Agar aap nay apna Full Name aur Address nahi bheja, to wo bhi text mein likh kar bhej dein.`;
+            billText += `*Total Items:* ${session.cart.length}\n*Total Bill:* Rs ${total}\n\n💳 *Payment Details:*\nEasypaisa Account: 03123123123\n\nKindly is number par payment kar k **Screenshot** isi chat mein bhejein.`;
             
-            session.step = 'checkout';
+            session.step = 'awaiting_ss';
             await sendText(senderPhone, billText);
         }
         else if (replyId === 'add_more') {
@@ -192,6 +203,7 @@ app.post('/webhook', async (req, res) => {
     res.sendStatus(200);
 });
 
+// Dynamic UI Functions
 async function sendDynamicMainMenu(to) {
     const rows = await getSheetData();
     const categories = [...new Set(rows.map(r => r[0] ? r[0].trim() : ''))].filter(Boolean);
@@ -213,7 +225,7 @@ async function sendDynamicMainMenu(to) {
 
 async function sendDynamicSizes(to, category) {
     const rows = await getSheetData();
-    const sizes = [...new Set(rows.filter(r => r[0].trim() === category).map(r => r[1] ? r[1].trim() : ''))].filter(Boolean);
+    const sizes = [...new Set(rows.filter(r => r[0] && r[0].toLowerCase().trim() === category.toLowerCase().trim()).map(r => r[1] ? r[1].trim() : ''))].filter(Boolean);
     const listRows = sizes.map(size => ({ id: `size_${category}_${size}`, title: size }));
 
     try {
@@ -231,15 +243,19 @@ async function sendDynamicSizes(to, category) {
 
 async function sendDynamicPrices(to, category, size) {
     const rows = await getSheetData();
-    const prices = [...new Set(rows.filter(r => r[0].trim() === category && r[1].trim() === size).map(r => r[2] ? r[2].trim() : ''))].filter(Boolean);
+    const prices = [...new Set(rows.filter(r => 
+        r[0] && r[0].toLowerCase().trim() === category.toLowerCase().trim() && 
+        r[1] && r[1].toLowerCase().trim() === size.toLowerCase().trim()
+    ).map(r => r[2] ? r[2].trim() : ''))].filter(Boolean);
+    
     const listRows = prices.map(price => ({ id: `price_${category}_${size}_${price}`, title: `Rs ${price}` }));
 
     try {
         await axios.post(`https://graph.facebook.com/v17.0/${PHONE_NUMBER_ID}/messages`, {
             messaging_product: "whatsapp", to: to, type: "interactive",
             interactive: {
-                type: "list", header: { type: "text", text: "Price Range" },
-                body: { text: `Iski price select karein:` },
+                type: "list", header: { type: "text", text: "Price Select Karein" },
+                body: { text: `Price select karein ta k hum video bhej sakein:` },
                 footer: { text: "Thrills Store" },
                 action: { button: "Prices", sections: [{ title: "Available Prices", rows: listRows }] }
             }
@@ -252,7 +268,7 @@ async function sendCheckoutMenu(to) {
         await axios.post(`https://graph.facebook.com/v17.0/${PHONE_NUMBER_ID}/messages`, {
             messaging_product: "whatsapp", to: to, type: "interactive",
             interactive: {
-                type: "button", body: { text: "Item pasand karne ka shukriya. Kuch aur dekhna chahtay hain ya bill banwaein?" },
+                type: "button", body: { text: "Item pasand karne ka shukriya. Kuch aur dekhna chahtay hain ya checkout kar k bill banwaein?" },
                 action: {
                     buttons: [
                         { type: "reply", reply: { id: "add_more", title: "Add More Items" } },
