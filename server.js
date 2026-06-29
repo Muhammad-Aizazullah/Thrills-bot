@@ -56,7 +56,10 @@ async function saveOrderToSheet(order) {
             valueInputOption: 'USER_ENTERED',
             requestBody: { values: [[order.id, order.phone, itemsString, order.total, order.name, order.address, order.time]] }
         });
-    } catch (error) { console.error("Order Save Error:", error); }
+        console.log("Order saved to sheet successfully.");
+    } catch (error) { 
+        console.error("Order Save Error. Make sure 'Orders' tab exists:", error.message); 
+    }
 }
 
 app.get('/api/orders', async (req, res) => {
@@ -69,10 +72,21 @@ app.get('/api/orders', async (req, res) => {
         });
         const rows = response.data.values || [];
         const orders = rows.map(row => ({
-            id: row[0], phone: row[1], items: row[2], total: row[3], name: row[4], address: row[5], time: row[6], status: 'New'
+            id: row[0] || 'N/A', 
+            phone: row[1] || 'N/A', 
+            items: row[2] || 'N/A', 
+            total: row[3] || '0', 
+            name: row[4] || 'N/A', 
+            address: row[5] || 'N/A', 
+            time: row[6] || 'N/A', 
+            status: 'New'
         }));
         res.json(orders);
-    } catch (error) { res.status(500).json({ error: error.message }); }
+    } catch (error) { 
+        console.error("Fetch Orders Error:", error.message);
+        // Crash say bachnay k liyay khali array return ki ha
+        res.json([]); 
+    }
 });
 
 app.post('/api/addproduct', async (req, res) => {
@@ -135,8 +149,9 @@ app.post('/webhook', async (req, res) => {
                     address: session.customerAddress,
                     time: new Date().toLocaleString()
                 };
+                
                 await saveOrderToSheet(newOrder);
-                await sendText(senderPhone, "Order confirm ho gaya ha! Shukriya.");
+                await sendText(senderPhone, "Aap ka order mukammal tor par confirm ho gaya ha! Admin jald he isay verify kar k dispatch kar de ga. Thrills say shopping karne ka bohat shukriya!");
                 sessions[senderPhone] = { cart: [], tempSelection: null, step: 'start', customerDetails: '', customerName: '', customerAddress: '' };
             } else {
                 await sendDynamicMainMenu(senderPhone);
@@ -158,7 +173,6 @@ app.post('/webhook', async (req, res) => {
                 const parts = replyId.split('price')[1].split('xx');
                 const rows = await getSheetData();
                 
-                // Safe aur Case-Insensitive Matching ta k bot stuck na ho
                 const matchedRow = rows.find(r => 
                     r[0] && r[0].toLowerCase().trim() === parts[0].toLowerCase().trim() && 
                     r[1] && r[1].toLowerCase().trim() === parts[1].toLowerCase().trim() && 

@@ -36,8 +36,15 @@ function switchTab(tabId, element) {
 async function fetchOrders() {
     try {
         const response = await fetch(APIURL);
-        allOrders = await response.json();
-        renderOrders();
+        const data = await response.json();
+        
+        // Agar Google Sheet ka koi error ha tou crash say bachnay k liyay check kia ha
+        if (Array.isArray(data)) {
+            allOrders = data;
+            renderOrders();
+        } else {
+            console.error('API did not return an array');
+        }
     } catch (error) { console.error('Error fetching orders:', error); }
 }
 
@@ -62,7 +69,6 @@ function renderOrders() {
     }
 
     filtered.forEach(order => {
-        // Name aur Address ko handle kia gaya ha
         let customerName = order.name ? order.name : 'Not provided';
         let customerAddress = order.address ? order.address : 'Not provided';
         
@@ -117,8 +123,6 @@ async function uploadAndSaveProduct() {
     const file = fileInput.files[0];
     const formData = new FormData();
     formData.append('file', file);
-    
-    // Cloudinary API k liyay upload_preset mein underscore lazmi ha, isay tabdeel nahi kia
     formData.append('upload_preset', UPLOADPRESET); 
 
     statusText.innerText = "Uploading video... Please wait.";
