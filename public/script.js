@@ -1,8 +1,8 @@
 const APIURL = '/api/orders';
-const ADD_PRODUCT_URL = '/api/add-product';
+const ADDPRODUCTURL = '/api/addproduct';
 
-const CLOUD_NAME = 'dh4c49ca4'; 
-const UPLOAD_PRESET = 'Thrills'; 
+const CLOUDNAME = 'dh4c49ca4'; 
+const UPLOADPRESET = 'Thrills'; 
 
 let allOrders = [];
 let currentFilter = 'New';
@@ -62,8 +62,9 @@ function renderOrders() {
     }
 
     filtered.forEach(order => {
-        let itemsHtml = order.items.map(i => `${i.item} (Size: ${i.size}) - Rs ${i.price}`).join('<br>');
-        let customerAddress = order.details ? order.details : 'Not provided';
+        // Name aur Address ko handle kia gaya ha
+        let customerName = order.name ? order.name : 'Not provided';
+        let customerAddress = order.address ? order.address : 'Not provided';
         
         const card = document.createElement('div');
         card.className = 'orderCard';
@@ -71,13 +72,14 @@ function renderOrders() {
             <div class="orderDetails">
                 <h4>Order ID: #${order.id}</h4>
                 <p><strong>Phone:</strong> ${order.phone}</p>
-                <p><strong>Date:</strong> ${order.time}</p>
-                <p><strong>Customer Details:</strong> ${customerAddress}</p>
-                <div class="orderItems">${itemsHtml}</div>
+                <p><strong>Name:</strong> ${customerName}</p>
+                <p><strong>Address:</strong> ${customerAddress}</p>
+                <p><strong>Items:</strong> ${order.items}</p>
                 <p><strong>Total Bill:</strong> Rs ${order.total}</p>
+                <p><strong>Time:</strong> ${order.time}</p>
             </div>
             <div class="orderActions">
-                <select id="status_${order.id}">
+                <select id="status${order.id}">
                     <option value="New" ${order.status === 'New' ? 'selected' : ''}>New</option>
                     <option value="Confirmed" ${order.status === 'Confirmed' ? 'selected' : ''}>Confirmed</option>
                     <option value="Dispatched" ${order.status === 'Dispatched' ? 'selected' : ''}>Dispatched</option>
@@ -91,7 +93,7 @@ function renderOrders() {
 }
 
 async function updateStatus(id) {
-    const newStatus = document.getElementById('status_' + id).value;
+    const newStatus = document.getElementById('status' + id).value;
     await fetch(APIURL + '/update', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -115,13 +117,15 @@ async function uploadAndSaveProduct() {
     const file = fileInput.files[0];
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('upload_preset', UPLOAD_PRESET); 
+    
+    // Cloudinary API k liyay upload_preset mein underscore lazmi ha, isay tabdeel nahi kia
+    formData.append('upload_preset', UPLOADPRESET); 
 
     statusText.innerText = "Uploading video... Please wait.";
     document.getElementById('uploadBtn').disabled = true;
 
     try {
-        const uploadRes = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/video/upload`, {
+        const uploadRes = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDNAME}/video/upload`, {
             method: 'POST',
             body: formData
         });
@@ -135,7 +139,7 @@ async function uploadAndSaveProduct() {
         const videoUrl = uploadData.secure_url;
         statusText.innerText = "Video uploaded! Saving to database...";
 
-        const saveRes = await fetch(ADD_PRODUCT_URL, {
+        const saveRes = await fetch(ADDPRODUCTURL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name, size, price, videoUrl })
