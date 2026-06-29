@@ -14,20 +14,68 @@ const WHATSAPPTOKEN = process.env.WHATSAPP_TOKEN;
 const PHONENUMBERID = process.env.PHONE_NUMBER_ID;
 const SPREADSHEETID = process.env.SPREADSHEET_ID;
 
-const sessions = {}; 
-let orderIdCounter = 1001;
-
-function getSession(phone) {
-    if (!sessions[phone]) {
-        sessions[phone] = { cart: [], tempSelection: null, step: 'start', customerDetails: '', customerName: '', customerAddress: '' };
-    }
-    return sessions[phone];
-}
-
 const auth = new google.auth.GoogleAuth({
     credentials: process.env.GOOGLE_CREDENTIALS ? JSON.parse(process.env.GOOGLE_CREDENTIALS) : {},
     scopes: ['https://www.googleapis.com/auth/spreadsheets'], 
 });
+
+// Google Sheet say permanent session state nikalnay ka function
+async function getSessionFromSheet(phone) {
+    try {
+        const client = await auth.getClient();
+        const sheets = google.sheets({ version: 'v4', auth: client });
+        const response = await sheets.spreadsheets.values.get({
+            spreadsheetId: SPREADSHEETID, range: 'BotSessions!A2:F'
+        });
+        const rows = response.data.values || [];
+        const row = rows.find(r => r[0] === phone);
+        if (row) {
+            return {
+                phone: row[0],
+                step: row[1] || 'start',
+                cart: row[2] ? JSON.parse(row[2]) : [],
+                customerName: row[3] || '',
+                customerAddress: row[4] || '',
+                tempSelection: row[5] ? JSON.parse(row[5]) : null
+            };
+        }
+    } catch (e) { console.error(e.message); }
+    return { phone, step: 'start', cart: [], customerName: '', customerAddress: '', tempSelection: null };
+}
+
+// Google Sheet mein session state save karnay ka function
+async function saveSessionToSheet(session) {
+    try {
+        const client = await auth.getClient();
+        const sheets = google.sheets({ version: 'v4', auth: client });
+        const response = await sheets.spreadsheets.values.get({
+            spreadsheetId: SPREADSHEETID, range: 'BotSessions!A2:A'
+        });
+        const rows = response.data.values || [];
+        const rowIndex = rows.findIndex(r => r[0] === session.phone) + 2;
+        
+        const values = [[
+            session.phone,
+            session.step,
+            JSON.stringify(session.cart),
+            session.customerName || '',
+            session.customerAddress || '',
+            session.tempSelection ? JSON.stringify(session.tempSelection) : ''
+        ]];
+
+        if (rowIndex > 1) {
+            await sheets.spreadsheets.values.update({
+                spreadsheetId: SPREADSHEETID, range: `BotSessions!A${rowIndex}:F${rowIndex}`,
+                valueInputOption: 'USER_ENTERED', requestBody: { values }
+            });
+        } else {
+            await sheets.spreadsheets.values.append({
+                spreadsheetId: SPREADSHEETID, range: 'BotSessions!A:F',
+                valueInputOption: 'USER_ENTERED', requestBody: { values }
+            });
+        }
+    } catch (e) { console.error(e.message); }
+}
 
 async function processWhatsAppMedia(mediaId) {
     try {
@@ -52,7 +100,7 @@ async function getSheetData() {
     try {
         const client = await auth.getClient();
         const sheets = google.sheets({ version: 'v4', auth: client });
-        const response = await sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEETID, range: 'Sheet1!A2:D100' });
+        const response = await sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEETID, range: 'Sheet1!A2:D' });
         return response.data.values || [];
     } catch (error) { throw new Error("Sheet read error"); }
 }
@@ -68,36 +116,11 @@ async function saveMessageToSheet(phone, sender, type, body) {
     } catch (e) {}
 }
 
-// Ye function Vercel ki memory loss ko cover karay ga
-async function rebuildSessionFromHistory(phone) {
-    try {
-        const client = await auth.getClient();
-        const sheets = google.sheets({ version: 'v4', auth: client });
-        const msgRes = await sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEETID, range: 'Messages!A2:E1000' });
-        const rows = msgRes.data.values || [];
-        const userMsgs = rows.filter(r => r[0] === phone && r[1] === 'Customer' && r[3] && r[3].startsWith('[Selected:'));
-        
-        if (userMsgs.length >= 3) {
-            const priceMsg = userMsgs[userMsgs.length - 1][3];
-            const sizeMsg = userMsgs[userMsgs.length - 2][3];
-            const itemMsg = userMsgs[userMsgs.length - 3][3];
-
-            if (priceMsg.includes('Rs')) {
-                const price = priceMsg.replace('[Selected: Rs ', '').replace(']', '').trim();
-                const size = sizeMsg.replace('[Selected: ', '').replace(']', '').trim();
-                const item = itemMsg.replace('[Selected: ', '').replace(']', '').trim();
-                return { item, size, price };
-            }
-        }
-        return null;
-    } catch (e) { return null; }
-}
-
 async function getBotStatus(phone) {
     try {
         const client = await auth.getClient();
         const sheets = google.sheets({ version: 'v4', auth: client });
-        const response = await sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEETID, range: 'BotStatus!A2:B100' });
+        const response = await sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEETID, range: 'BotStatus!A2:B' });
         const rows = response.data.values || [];
         const row = rows.find(r => r[0] === phone);
         return row ? row[1] : 'Active';
@@ -108,7 +131,7 @@ async function setBotStatus(phone, status) {
     try {
         const client = await auth.getClient();
         const sheets = google.sheets({ version: 'v4', auth: client });
-        const response = await sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEETID, range: 'BotStatus!A2:A100' });
+        const response = await sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEETID, range: 'BotStatus!A2:A' });
         const rows = response.data.values || [];
         const rowIndex = rows.findIndex(r => r[0] === phone) + 2;
         if (rowIndex > 1) {
@@ -135,7 +158,7 @@ app.get('/api/orders', async (req, res) => {
     try {
         const client = await auth.getClient();
         const sheets = google.sheets({ version: 'v4', auth: client });
-        const response = await sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEETID, range: 'Orders!A2:H100' });
+        const response = await sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEETID, range: 'Orders!A2:H' });
         const rows = response.data.values || [];
         res.json(rows.map(row => ({ id: row[0], phone: row[1], items: row[2], total: row[3], name: row[4], address: row[5], time: row[6], status: row[7] || 'New' })));
     } catch (error) { res.json([]); }
@@ -146,7 +169,7 @@ app.post('/api/orders/update', async (req, res) => {
         const { id, status } = req.body;
         const client = await auth.getClient();
         const sheets = google.sheets({ version: 'v4', auth: client });
-        const response = await sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEETID, range: 'Orders!A2:A100' });
+        const response = await sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEETID, range: 'Orders!A2:A' });
         const rows = response.data.values || [];
         const rowIndex = rows.findIndex(r => r[0] === id.toString()) + 2;
         if (rowIndex > 1) {
@@ -160,8 +183,8 @@ app.get('/api/chats', async (req, res) => {
     try {
         const client = await auth.getClient();
         const sheets = google.sheets({ version: 'v4', auth: client });
-        const msgRes = await sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEETID, range: 'Messages!A2:E1000' });
-        const statusRes = await sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEETID, range: 'BotStatus!A2:B100' });
+        const msgRes = await sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEETID, range: 'Messages!A2:E' });
+        const statusRes = await sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEETID, range: 'BotStatus!A2:B' });
         res.json({ messages: msgRes.data.values || [], statuses: statusRes.data.values || [] });
     } catch (e) { res.json({ messages: [], statuses: [] }); }
 });
@@ -200,7 +223,9 @@ app.post('/webhook', async (req, res) => {
     try {
         if (!req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0]) return res.sendStatus(200);
         const message = req.body.entry[0].changes[0].value.messages[0];
-        const session = getSession(senderPhone);
+        
+        // Permanent database context load
+        const session = await getSessionFromSheet(senderPhone);
 
         let bodyText = "";
         if (message.type === 'text') { bodyText = message.text.body; } 
@@ -219,20 +244,16 @@ app.post('/webhook', async (req, res) => {
         if (message.type === 'image') {
             if (session.step === 'awaitingSS') {
                 session.step = 'awaitingName';
+                await saveSessionToSheet(session);
                 await sendText(senderPhone, "SS mil gaya! Ab kindly apna Full Name bhej dein:");
+            } else if (session.tempSelection) {
+                session.cart.push(session.tempSelection);
+                session.tempSelection = null;
+                await saveSessionToSheet(session);
+                await sendCheckoutMenu(senderPhone);
             } else {
-                if (!session.tempSelection) {
-                    session.tempSelection = await rebuildSessionFromHistory(senderPhone);
-                }
-                
-                if (session.tempSelection) {
-                    session.cart.push(session.tempSelection);
-                    session.tempSelection = null;
-                    await sendCheckoutMenu(senderPhone);
-                } else {
-                    await sendText(senderPhone, "Mujhe tasveer mili ha lekin item track nahi ho saki. Please pehlay menu say select karein.");
-                    await sendDynamicMainMenu(senderPhone);
-                }
+                await sendText(senderPhone, "Kindly pehlay menu say price select karein phir screenshot bhejein.");
+                await sendDynamicMainMenu(senderPhone);
             }
             return res.sendStatus(200);
         }
@@ -241,14 +262,23 @@ app.post('/webhook', async (req, res) => {
             if (session.step === 'awaitingName') {
                 session.customerName = message.text.body;
                 session.step = 'awaitingAddress';
+                await saveSessionToSheet(session);
                 await sendText(senderPhone, "Name save ho gaya! Ab apna mukammal Address bhej dein:");
             } else if (session.step === 'awaitingAddress') {
                 session.customerAddress = message.text.body;
                 let totalBill = session.cart.reduce((sum, item) => sum + parseInt(item.price), 0);
+                
                 const newOrder = { id: orderIdCounter++, phone: senderPhone, items: [...session.cart], total: totalBill, name: session.customerName, address: session.customerAddress, time: new Date().toLocaleString() };
                 await saveOrderToSheet(newOrder);
                 await sendText(senderPhone, "Aap ka order confirm ho gaya ha! Thrills Store say shopping karne ka shukriya.");
-                sessions[senderPhone] = { cart: [], tempSelection: null, step: 'start', customerDetails: '', customerName: '', customerAddress: '' };
+                
+                // Clear session records completely after confirmation
+                session.step = 'start';
+                session.cart = [];
+                session.customerName = '';
+                session.customerAddress = '';
+                session.tempSelection = null;
+                await saveSessionToSheet(session);
             } else {
                 await sendDynamicMainMenu(senderPhone);
             }
@@ -268,6 +298,7 @@ app.post('/webhook', async (req, res) => {
                 const matchedRow = rows.find(r => r[0] && r[0].toLowerCase().trim() === parts[0].toLowerCase().trim() && r[1] && r[1].toLowerCase().trim() === parts[1].toLowerCase().trim() && r[2] && r[2].toLowerCase().trim() === parts[2].toLowerCase().trim());
                 if (matchedRow) {
                     session.tempSelection = { item: matchedRow[0], size: matchedRow[1], price: matchedRow[2] };
+                    await saveSessionToSheet(session);
                     await sendVideo(senderPhone, matchedRow[3]);
                 }
             }
@@ -277,6 +308,7 @@ app.post('/webhook', async (req, res) => {
                 session.cart.forEach((c, index) => { billText += `Item${index + 1} name: ${c.item}\nItem${index + 1} Price: ${c.price}\n\n`; total += parseInt(c.price); });
                 billText += `*Total Bill:* ${total}\n\n💳 *Payment Details:*\nEasypaisa Account: 03123123123\n\nKindly is number par payment kar k **Screenshot** isi chat mein bhejein.`;
                 session.step = 'awaitingSS';
+                await saveSessionToSheet(session);
                 await sendText(senderPhone, billText);
             }
             else if (replyId === 'addmore') await sendDynamicMainMenu(senderPhone);
