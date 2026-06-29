@@ -29,6 +29,36 @@ const auth = new google.auth.GoogleAuth({
     scopes: ['https://www.googleapis.com/auth/spreadsheets'], 
 });
 
+// Naya Function: WhatsApp say image lay kar Cloudinary par upload karnay k liyay
+async function processWhatsAppMedia(mediaId) {
+    try {
+        const res = await axios.get(`https://graph.facebook.com/v17.0/${mediaId}`, {
+            headers: { Authorization: `Bearer ${WHATSAPPTOKEN}` }
+        });
+        
+        const mediaUrl = res.data.url;
+        const mimeType = res.data.mime_type || 'image/jpeg';
+        
+        const mediaRes = await axios.get(mediaUrl, {
+            headers: { Authorization: `Bearer ${WHATSAPPTOKEN}` },
+            responseType: 'arraybuffer'
+        });
+        
+        const base64Str = Buffer.from(mediaRes.data, 'binary').toString('base64');
+        const dataUri = `data:${mimeType};base64,${base64Str}`;
+        
+        const cloudRes = await axios.post(`https://api.cloudinary.com/v1_1/dh4c49ca4/image/upload`, {
+            file: dataUri,
+            upload_preset: 'Thrills'
+        });
+        
+        return cloudRes.data.secure_url;
+    } catch (e) {
+        console.error("Media Upload Error:", e.message);
+        return null;
+    }
+}
+
 async function getSheetData() {
     try {
         const client = await auth.getClient();
@@ -39,7 +69,6 @@ async function getSheetData() {
         });
         return response.data.values || [];
     } catch (error) {
-        console.error("Sheet Data Fetch Error:", error.message);
         throw new Error("Sheet1 read error: " + error.message);
     }
 }
@@ -54,9 +83,7 @@ async function saveMessageToSheet(phone, sender, type, body) {
             valueInputOption: 'USER_ENTERED',
             requestBody: { values: [[phone, sender, type, body, new Date().toLocaleString()]] }
         });
-    } catch (e) { 
-        console.error("Messages Tab Save Error:", e.message); 
-    }
+    } catch (e) { console.error("Messages Tab Save Error:", e.message); }
 }
 
 async function getBotStatus(phone) {
@@ -67,9 +94,7 @@ async function getBotStatus(phone) {
         const rows = response.data.values || [];
         const row = rows.find(r => r[0] === phone);
         return row ? row[1] : 'Active';
-    } catch (e) { 
-        return 'Active'; 
-    }
+    } catch (e) { return 'Active'; }
 }
 
 async function setBotStatus(phone, status) {
@@ -111,7 +136,6 @@ async function saveOrderToSheet(order) {
     } catch (error) { console.error(error); }
 }
 
-// ... Yahan par APIs same rehnay dein (orders, addproduct, chats)...
 app.get('/api/orders', async (req, res) => {
     try {
         const client = await auth.getClient();
@@ -195,15 +219,23 @@ app.post('/webhook', async (req, res) => {
         const session = getSession(senderPhone);
 
         let bodyText = "";
-        if (message.type === 'text') bodyText = message.text.body;
-        else if (message.type === 'image') bodyText = "[Screenshot Image]";
-        else if (message.type === 'interactive') bodyText = `[Selected: ${message.interactive.list_reply?.title || message.interactive.button_reply?.title}]`;
+        if (message.type === 'text') {
+            bodyText = message.text.body;
+        } 
+        else if (message.type === 'image') {
+            // Media Process ho kar Cloudinary par upload hoga
+            const mediaId = message.image.id;
+            const uploadedUrl = await processWhatsAppMedia(mediaId);
+            bodyText = uploadedUrl ? uploadedUrl : "[Screenshot Error]";
+        } 
+        else if (message.type === 'interactive') {
+            bodyText = `[Selected: ${message.interactive.list_reply?.title || message.interactive.button_reply?.title}]`;
+        }
 
-        // Pehlay Message Sheet mein save hoga
         await saveMessageToSheet(senderPhone, 'Customer', message.type, bodyText);
 
         const currentBotStatus = await getBotStatus(senderPhone);
-        if (currentBotStatus === 'Paused') return res.sendStatus(200); // Agar bot paused ha tou aagay nahi jayega
+        if (currentBotStatus === 'Paused') return res.sendStatus(200);
 
         if (message.type === 'image') {
             if (session.step === 'awaitingSS') {
@@ -213,6 +245,10 @@ app.post('/webhook', async (req, res) => {
                 session.cart.push(session.tempSelection);
                 session.tempSelection = null;
                 await sendCheckoutMenu(senderPhone);
+            } else {
+                // FALLBACK: Agar bot stuck ho raha tha
+                await sendText(senderPhone, "Mujhe aap ki tasveer mil gai ha, lekin pehlay menu say koi item select karein ta k main usay cart mein daal sakoon.");
+                await sendDynamicMainMenu(senderPhone);
             }
             return res.sendStatus(200);
         }
@@ -271,7 +307,6 @@ app.post('/webhook', async (req, res) => {
         }
     } catch (err) { 
         console.error(err); 
-        // Ye line aap ko error sidha WhatsApp par bhej de gi!
         if(senderPhone) await sendText(senderPhone, "Bot Error Aagaya Ha: " + err.message);
     }
     res.sendStatus(200);

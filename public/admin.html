@@ -25,7 +25,6 @@
         .tab-content { display: none; height: calc(100% - 70px); padding: 25px; overflow-y: auto; }
         .tab-content.active-content { display: block; }
         
-        /* Order Cards Styling */
         .filter-container { display: flex; gap: 10px; margin-bottom: 20px; }
         .filter-btn { padding: 8px 16px; background: #334155; color: #fff; border: none; border-radius: 6px; cursor: pointer; }
         .filter-btn.active-filter { background: #38bdf8; color: #0f172a; font-weight: bold; }
@@ -34,11 +33,9 @@
         .orderActions { display: flex; flex-direction: column; gap: 10px; }
         .orderActions select { padding: 8px; border-radius: 6px; background: #334155; color: #fff; border: none; }
         
-        /* Product Form Styling */
         .product-form { display: flex; flex-direction: column; gap: 15px; max-width: 500px; }
         .product-form input, .product-form select { width: 100%; padding: 12px; background: #334155; border: none; color: white; border-radius: 6px; }
         
-        /* Chat Interface Layout */
         .chat-container { display: flex; height: 100%; border-radius: 8px; overflow: hidden; background: #0f172a; }
         .chat-sidebar { width: 30%; background: #1e293b; border-right: 2px solid #334155; display: flex; flex-direction: column; }
         .chat-search-box { padding: 10px; background: #0f172a; }
@@ -50,7 +47,28 @@
         .chat-main-window { width: 50%; display: flex; flex-direction: column; background: #0f172a; position: relative; }
         .chat-header { padding: 15px; background: #1e293b; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; }
         .chat-messages { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
-        .message-bubble { max-width: 70%; padding: 10px 14px; border-radius: 8px; font-size: 15px; position: relative; }
+        
+        /* Message Wrap Fixes (Issue #3) */
+        .message-bubble { 
+            max-width: 70%; 
+            padding: 10px 14px; 
+            border-radius: 8px; 
+            font-size: 15px; 
+            position: relative; 
+            word-wrap: break-word; 
+            word-break: break-word; 
+            overflow-wrap: break-word; 
+            white-space: pre-wrap; 
+        }
+        .chat-image {
+            width: 100%;
+            max-width: 250px;
+            border-radius: 6px;
+            margin-top: 5px;
+            cursor: pointer;
+            border: 2px solid #38bdf8;
+        }
+
         .msg-customer { background: #334155; align-self: flex-start; color: white; }
         .msg-bot { background: #0284c7; align-self: flex-end; color: white; }
         .time-stamp { font-size: 10px; color: #94a3b8; display: block; text-align: right; margin-top: 4px; }

@@ -147,7 +147,14 @@ function renderChatWindow(phone) {
     userMsgs.forEach(m => {
         const div = document.createElement('div');
         div.className = `message-bubble ${m[1].toLowerCase() === 'customer' ? 'msg-customer' : 'msg-bot'}`;
-        div.innerHTML = `<strong>${m[1]}:</strong> <p>${m[3]}</p> <span class="time-stamp">${m[4]}</span>`;
+        
+        // Image tag replacement logic
+        let contentHtml = `<p>${m[3]}</p>`;
+        if (m[2] === 'image' && m[3].startsWith('http')) {
+            contentHtml = `<a href="${m[3]}" target="_blank"><img src="${m[3]}" class="chat-image" alt="Customer Image" /></a>`;
+        }
+
+        div.innerHTML = `<strong>${m[1]}:</strong> ${contentHtml} <span class="time-stamp">${m[4]}</span>`;
         windowContainer.appendChild(div);
     });
 
