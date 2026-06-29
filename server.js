@@ -38,7 +38,10 @@ async function getSheetData() {
             range: 'Sheet1!A2:D100', 
         });
         return response.data.values || [];
-    } catch (error) { return []; }
+    } catch (error) {
+        console.error("Sheet Data Fetch Error:", error.message);
+        throw new Error("Sheet1 read error: " + error.message);
+    }
 }
 
 async function saveMessageToSheet(phone, sender, type, body) {
@@ -51,7 +54,9 @@ async function saveMessageToSheet(phone, sender, type, body) {
             valueInputOption: 'USER_ENTERED',
             requestBody: { values: [[phone, sender, type, body, new Date().toLocaleString()]] }
         });
-    } catch (e) { console.error(e.message); }
+    } catch (e) { 
+        console.error("Messages Tab Save Error:", e.message); 
+    }
 }
 
 async function getBotStatus(phone) {
@@ -62,7 +67,9 @@ async function getBotStatus(phone) {
         const rows = response.data.values || [];
         const row = rows.find(r => r[0] === phone);
         return row ? row[1] : 'Active';
-    } catch (e) { return 'Active'; }
+    } catch (e) { 
+        return 'Active'; 
+    }
 }
 
 async function setBotStatus(phone, status) {
@@ -104,6 +111,7 @@ async function saveOrderToSheet(order) {
     } catch (error) { console.error(error); }
 }
 
+// ... Yahan par APIs same rehnay dein (orders, addproduct, chats)...
 app.get('/api/orders', async (req, res) => {
     try {
         const client = await auth.getClient();
@@ -126,10 +134,7 @@ app.post('/api/orders/update', async (req, res) => {
         const rowIndex = rows.findIndex(r => r[0] === id.toString()) + 2;
         if (rowIndex > 1) {
             await sheets.spreadsheets.values.update({
-                spreadsheetId: SPREADSHEETID,
-                range: `Orders!H${rowIndex}`,
-                valueInputOption: 'USER_ENTERED',
-                requestBody: { values: [[status]] }
+                spreadsheetId: SPREADSHEETID, range: `Orders!H${rowIndex}`, valueInputOption: 'USER_ENTERED', requestBody: { values: [[status]] }
             });
             res.json({ success: true });
         } else { res.status(404).json({ success: false }); }
@@ -182,10 +187,11 @@ app.get('/webhook', (req, res) => {
 });
 
 app.post('/webhook', async (req, res) => {
+    const senderPhone = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0]?.from;
+    
     try {
         if (!req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0]) return res.sendStatus(200);
         const message = req.body.entry[0].changes[0].value.messages[0];
-        const senderPhone = message.from;
         const session = getSession(senderPhone);
 
         let bodyText = "";
@@ -193,10 +199,11 @@ app.post('/webhook', async (req, res) => {
         else if (message.type === 'image') bodyText = "[Screenshot Image]";
         else if (message.type === 'interactive') bodyText = `[Selected: ${message.interactive.list_reply?.title || message.interactive.button_reply?.title}]`;
 
+        // Pehlay Message Sheet mein save hoga
         await saveMessageToSheet(senderPhone, 'Customer', message.type, bodyText);
 
         const currentBotStatus = await getBotStatus(senderPhone);
-        if (currentBotStatus === 'Paused') return res.sendStatus(200);
+        if (currentBotStatus === 'Paused') return res.sendStatus(200); // Agar bot paused ha tou aagay nahi jayega
 
         if (message.type === 'image') {
             if (session.step === 'awaitingSS') {
@@ -245,6 +252,8 @@ app.post('/webhook', async (req, res) => {
                 if (matchedRow) {
                     session.tempSelection = { item: matchedRow[0], size: matchedRow[1], price: matchedRow[2] };
                     await sendVideo(senderPhone, matchedRow[3]);
+                } else {
+                    await sendText(senderPhone, "Is waqt ye item load nahi ho rahi, admin ko message bhej dia gaya ha.");
                 }
             }
             else if (replyId === 'checkout') {
@@ -260,23 +269,34 @@ app.post('/webhook', async (req, res) => {
             }
             else if (replyId === 'addmore') await sendDynamicMainMenu(senderPhone);
         }
-    } catch (err) { console.error(err); }
+    } catch (err) { 
+        console.error(err); 
+        // Ye line aap ko error sidha WhatsApp par bhej de gi!
+        if(senderPhone) await sendText(senderPhone, "Bot Error Aagaya Ha: " + err.message);
+    }
     res.sendStatus(200);
 });
 
 async function sendDynamicMainMenu(to) {
-    const rows = await getSheetData();
-    const categories = [...new Set(rows.map(r => r[0] ? r[0].trim() : ''))].filter(Boolean);
-    if (categories.length === 0) return;
-    const listRows = categories.map(cat => ({ id: `cat${cat}`, title: cat }));
     try {
+        const rows = await getSheetData();
+        const categories = [...new Set(rows.map(r => r[0] ? r[0].trim() : ''))].filter(Boolean);
+        
+        if (categories.length === 0) {
+            await sendText(to, "Thrills Bot Active Ha, lekin Google Sheet say items nahi mil rahi. Tabs check karein.");
+            return;
+        }
+        
+        const listRows = categories.map(cat => ({ id: `cat${cat}`, title: cat }));
         await axios.post(`https://graph.facebook.com/v17.0/${PHONENUMBERID}/messages`, {
             messaging_product: "whatsapp", to: to, type: "interactive",
             interactive: {
                 type: "list", header: { type: "text", text: "Thrills Store" }, body: { text: "Kia dekhna pasand karein gay?" }, footer: { text: "Menu" }, action: { button: "Categories", sections: [{ title: "Items", rows: listRows }] }
             }
         }, { headers: { Authorization: `Bearer ${WHATSAPPTOKEN}` } });
-    } catch (e) {}
+    } catch (e) {
+        await sendText(to, "Main Menu Error: " + e.message);
+    }
 }
 
 async function sendDynamicSizes(to, category) {
