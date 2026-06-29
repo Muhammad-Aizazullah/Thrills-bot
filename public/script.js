@@ -5,7 +5,11 @@ const CLOUDNAME = 'dh4c49ca4';
 const UPLOADPRESET = 'Thrills'; 
 
 let allOrders = [];
+let allChats = [];
+let botStatuses = {};
 let currentFilter = 'New';
+let activeChatPhone = null;
+let chatFilter = 'all';
 
 function checkPassword() {
     const pass = document.getElementById('adminPassword').value;
@@ -13,10 +17,10 @@ function checkPassword() {
         document.getElementById('loginScreen').style.display = 'none';
         document.getElementById('dashboard').style.display = 'block';
         fetchOrders();
+        fetchChats();
         setInterval(fetchOrders, 10000); 
-    } else {
-        alert('Wrong Password!');
-    }
+        setInterval(fetchChats, 5000); 
+    } else { alert('Wrong Password!'); }
 }
 
 function logout() {
@@ -28,7 +32,6 @@ function logout() {
 function switchTab(tabId, element) {
     document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active-content'));
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    
     document.getElementById(tabId).classList.add('active-content');
     element.classList.add('active');
 }
@@ -36,16 +39,9 @@ function switchTab(tabId, element) {
 async function fetchOrders() {
     try {
         const response = await fetch(APIURL);
-        const data = await response.json();
-        
-        // Agar Google Sheet ka koi error ha tou crash say bachnay k liyay check kia ha
-        if (Array.isArray(data)) {
-            allOrders = data;
-            renderOrders();
-        } else {
-            console.error('API did not return an array');
-        }
-    } catch (error) { console.error('Error fetching orders:', error); }
+        allOrders = await response.json();
+        renderOrders();
+    } catch (error) { console.error(error); }
 }
 
 function filterOrders(status) {
@@ -60,26 +56,20 @@ function filterOrders(status) {
 function renderOrders() {
     const container = document.getElementById('ordersContainer');
     container.innerHTML = '';
-    
     const filtered = allOrders.filter(o => o.status === currentFilter);
-    
     if(filtered.length === 0) {
-        container.innerHTML = '<p>No orders found in this category.</p>';
+        container.innerHTML = '<p>No orders found.</p>';
         return;
     }
-
     filtered.forEach(order => {
-        let customerName = order.name ? order.name : 'Not provided';
-        let customerAddress = order.address ? order.address : 'Not provided';
-        
         const card = document.createElement('div');
         card.className = 'orderCard';
         card.innerHTML = `
             <div class="orderDetails">
                 <h4>Order ID: #${order.id}</h4>
                 <p><strong>Phone:</strong> ${order.phone}</p>
-                <p><strong>Name:</strong> ${customerName}</p>
-                <p><strong>Address:</strong> ${customerAddress}</p>
+                <p><strong>Name:</strong> ${order.name}</p>
+                <p><strong>Address:</strong> ${order.address}</p>
                 <p><strong>Items:</strong> ${order.items}</p>
                 <p><strong>Total Bill:</strong> Rs ${order.total}</p>
                 <p><strong>Time:</strong> ${order.time}</p>
@@ -100,12 +90,99 @@ function renderOrders() {
 
 async function updateStatus(id) {
     const newStatus = document.getElementById('status' + id).value;
-    await fetch(APIURL + '/update', {
+    try {
+        const res = await fetch(APIURL + '/update', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: id, status: newStatus })
+        });
+        const data = await res.json();
+        if(data.success) { alert("Status successfully updated!"); fetchOrders(); }
+    } catch (e) { alert("Error updating status"); }
+}
+
+async function fetchChats() {
+    try {
+        const response = await fetch('/api/chats');
+        const data = await response.json();
+        allChats = data.messages;
+        botStatuses = {};
+        data.statuses.forEach(s => { botStatuses[s[0]] = s[1]; });
+        renderChatList();
+        if (activeChatPhone) renderChatWindow(activeChatPhone);
+    } catch (e) {}
+}
+
+function setChatFilter(val) {
+    chatFilter = val;
+    renderChatList();
+}
+
+function renderChatList() {
+    const listContainer = document.getElementById('chatListContainer');
+    const searchVal = document.getElementById('chatSearch').value.toLowerCase();
+    listContainer.innerHTML = '';
+
+    const uniquePhones = [...new Set(allChats.map(m => m[0]))];
+
+    uniquePhones.forEach(phone => {
+        const hasOrder = allOrders.some(o => o.phone === phone);
+        if (chatFilter === 'confirmed' && !hasOrder) return;
+        if (chatFilter === 'notconfirmed' && hasOrder) return;
+        if (searchVal && !phone.toLowerCase().includes(searchVal)) return;
+
+        const div = document.createElement('div');
+        div.className = `chat-user-item ${activeChatPhone === phone ? 'active-chat' : ''}`;
+        div.innerHTML = `<strong>${phone}</strong> <br><small>${hasOrder ? 'Order Holder' : 'Visitor'}</small>`;
+        div.onclick = () => { activeChatPhone = phone; renderChatWindow(phone); };
+        listContainer.appendChild(div);
+    });
+}
+
+function renderChatWindow(phone) {
+    const windowContainer = document.getElementById('chatWindowMessages');
+    windowContainer.innerHTML = '';
+    
+    const userMsgs = allChats.filter(m => m[0] === phone);
+    userMsgs.forEach(m => {
+        const div = document.createElement('div');
+        div.className = `message-bubble ${m[1].toLowerCase() === 'customer' ? 'msg-customer' : 'msg-bot'}`;
+        div.innerHTML = `<strong>${m[1]}:</strong> <p>${m[3]}</p> <span class="time-stamp">${m[4]}</span>`;
+        windowContainer.appendChild(div);
+    });
+
+    const isPaused = botStatuses[phone] === 'Paused';
+    document.getElementById('botToggleBtn').innerText = isPaused ? "Resume Bot Auto-Reply" : "Pause Bot (Take Over Chat)";
+    document.getElementById('botToggleBtn').className = isPaused ? "btn-resume" : "btn-pause";
+    
+    const linkedOrder = allOrders.find(o => o.phone === phone);
+    const detailsContainer = document.getElementById('chatOrderSidebar');
+    if (linkedOrder) {
+        detailsContainer.innerHTML = `<h4>Order Info</h4><p>ID: #${linkedOrder.id}</p><p>Name: ${linkedOrder.name}</p><p>Total: Rs ${linkedOrder.total}</p><p>Status: ${linkedOrder.status}</p>`;
+    } else { detailsContainer.innerHTML = `<h4>No Active Order</h4>`; }
+}
+
+async function toggleBot() {
+    if (!activeChatPhone) return;
+    const current = botStatuses[activeChatPhone] === 'Paused' ? 'Active' : 'Paused';
+    await fetch('/api/chats/togglebot', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: id, status: newStatus })
+        body: JSON.stringify({ phone: activeChatPhone, status: current })
     });
-    fetchOrders();
+    fetchChats();
+}
+
+async function sendManualReply() {
+    const text = document.getElementById('manualReplyInput').value;
+    if (!text || !activeChatPhone) return;
+    await fetch('/api/chats/reply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: activeChatPhone, text: text })
+    });
+    document.getElementById('manualReplyInput').value = '';
+    fetchChats();
 }
 
 async function uploadAndSaveProduct() {
@@ -116,58 +193,33 @@ async function uploadAndSaveProduct() {
     const statusText = document.getElementById('uploadStatus');
 
     if (!name || !size || !price || fileInput.files.length === 0) {
-        alert("Please fill all fields and select a video.");
+        alert("Please fill all fields.");
         return;
     }
 
-    const file = fileInput.files[0];
     const formData = new FormData();
-    formData.append('file', file);
-    formData.append('upload_preset', UPLOADPRESET); 
+    formData.append('file', fileInput.files[0]);
+    formData.append('upload_preset', UPLOADPRESET);
 
-    statusText.innerText = "Uploading video... Please wait.";
+    statusText.innerText = "Uploading to Cloudinary...";
     document.getElementById('uploadBtn').disabled = true;
 
     try {
-        const uploadRes = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDNAME}/video/upload`, {
-            method: 'POST',
-            body: formData
-        });
-        
+        const uploadRes = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDNAME}/video/upload`, { method: 'POST', body: formData });
         const uploadData = await uploadRes.json();
-        
-        if (!uploadData.secure_url) {
-            throw new Error("Video upload failed. Check Cloudinary settings.");
-        }
+        if (!uploadData.secure_url) throw new Error("Upload Failed");
 
-        const videoUrl = uploadData.secure_url;
-        statusText.innerText = "Video uploaded! Saving to database...";
-
+        statusText.innerText = "Saving to Google Sheets...";
         const saveRes = await fetch(ADDPRODUCTURL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, size, price, videoUrl })
+            body: JSON.stringify({ name, size, price, videoUrl: uploadData.secure_url })
         });
-
         const saveData = await saveRes.json();
-        
         if (saveData.success) {
-            statusText.innerText = "Product added successfully!";
+            statusText.innerText = "Product successfully live!";
             statusText.style.color = "green";
-            
-            document.getElementById('itemName').value = '';
-            document.getElementById('itemSize').value = '';
-            document.getElementById('itemPrice').value = '';
-            fileInput.value = '';
-        } else {
-            throw new Error("Failed to save to Google Sheet.");
         }
-
-    } catch (error) {
-        console.error(error);
-        statusText.innerText = "Error: " + error.message;
-        statusText.style.color = "red";
-    } finally {
-        document.getElementById('uploadBtn').disabled = false;
-    }
+    } catch (e) { statusText.innerText = "Error: " + e.message; statusText.style.color = "red"; }
+    finally { document.getElementById('uploadBtn').disabled = false; }
 }
