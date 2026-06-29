@@ -19,7 +19,6 @@ const auth = new google.auth.GoogleAuth({
     scopes: ['https://www.googleapis.com/auth/spreadsheets'], 
 });
 
-// Google Sheet say permanent session state nikalnay ka function
 async function getSessionFromSheet(phone) {
     try {
         const client = await auth.getClient();
@@ -43,7 +42,6 @@ async function getSessionFromSheet(phone) {
     return { phone, step: 'start', cart: [], customerName: '', customerAddress: '', tempSelection: null };
 }
 
-// Google Sheet mein session state save karnay ka function
 async function saveSessionToSheet(session) {
     try {
         const client = await auth.getClient();
@@ -102,7 +100,7 @@ async function getSheetData() {
         const sheets = google.sheets({ version: 'v4', auth: client });
         const response = await sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEETID, range: 'Sheet1!A2:D' });
         return response.data.values || [];
-    } catch (error) { throw new Error("Sheet read error"); }
+    } catch (error) { throw new Error("Sheet1 read fail ho rahi ha"); }
 }
 
 async function saveMessageToSheet(phone, sender, type, body) {
@@ -224,7 +222,6 @@ app.post('/webhook', async (req, res) => {
         if (!req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0]) return res.sendStatus(200);
         const message = req.body.entry[0].changes[0].value.messages[0];
         
-        // Permanent database context load
         const session = await getSessionFromSheet(senderPhone);
 
         let bodyText = "";
@@ -272,7 +269,6 @@ app.post('/webhook', async (req, res) => {
                 await saveOrderToSheet(newOrder);
                 await sendText(senderPhone, "Aap ka order confirm ho gaya ha! Thrills Store say shopping karne ka shukriya.");
                 
-                // Clear session records completely after confirmation
                 session.step = 'start';
                 session.cart = [];
                 session.customerName = '';
@@ -313,7 +309,9 @@ app.post('/webhook', async (req, res) => {
             }
             else if (replyId === 'addmore') await sendDynamicMainMenu(senderPhone);
         }
-    } catch (err) { if(senderPhone) await sendText(senderPhone, "System Error: " + err.message); }
+    } catch (err) { 
+        if(senderPhone) await sendText(senderPhone, "Critical Webhook Error: " + err.message); 
+    }
     res.sendStatus(200);
 });
 
@@ -321,38 +319,49 @@ async function sendDynamicMainMenu(to) {
     try {
         const rows = await getSheetData();
         const categories = [...new Set(rows.map(r => r[0] ? r[0].trim() : ''))].filter(Boolean);
-        if (categories.length === 0) return;
+        if (categories.length === 0) {
+            await sendText(to, "Error: Sheet1 khali ha ya categories nahi miliyan.");
+            return;
+        }
         const listRows = categories.map(cat => ({ id: `cat${cat}`, title: cat }));
         await axios.post(`https://graph.facebook.com/v17.0/${PHONENUMBERID}/messages`, { messaging_product: "whatsapp", to: to, type: "interactive", interactive: { type: "list", header: { type: "text", text: "Thrills Store" }, body: { text: "Kia dekhna pasand karein gay?" }, footer: { text: "Menu" }, action: { button: "Categories", sections: [{ title: "Items", rows: listRows }] } } }, { headers: { Authorization: `Bearer ${WHATSAPPTOKEN}` } });
         await saveMessageToSheet(to, 'Bot', 'text', 'Menu bheja gaya: Main Categories');
-    } catch (e) {}
+    } catch (e) {
+        await sendText(to, "Main Menu Error Check: " + e.message);
+    }
 }
 
 async function sendDynamicSizes(to, category) {
-    const rows = await getSheetData();
-    const sizes = [...new Set(rows.filter(r => r[0] && r[0].toLowerCase().trim() === category.toLowerCase().trim()).map(r => r[1] ? r[1].trim() : ''))].filter(Boolean);
-    const listRows = sizes.map(size => ({ id: `size${category}xx${size}`, title: size }));
     try {
+        const rows = await getSheetData();
+        const sizes = [...new Set(rows.filter(r => r[0] && r[0].toLowerCase().trim() === category.toLowerCase().trim()).map(r => r[1] ? r[1].trim() : ''))].filter(Boolean);
+        const listRows = sizes.map(size => ({ id: `size${category}xx${size}`, title: size }));
         await axios.post(`https://graph.facebook.com/v17.0/${PHONENUMBERID}/messages`, { messaging_product: "whatsapp", to: to, type: "interactive", interactive: { type: "list", header: { type: "text", text: "Sizes" }, body: { text: `Aap nay ${category} select kia ha. Size select karein:` }, footer: { text: "Thrills" }, action: { button: "Sizes", sections: [{ title: "Sizes", rows: listRows }] } } }, { headers: { Authorization: `Bearer ${WHATSAPPTOKEN}` } });
         await saveMessageToSheet(to, 'Bot', 'text', `Sizes menu bheja gaya for: ${category}`);
-    } catch (e) {}
+    } catch (e) {
+        await sendText(to, "Sizes Send Error: " + e.message);
+    }
 }
 
 async function sendDynamicPrices(to, category, size) {
-    const rows = await getSheetData();
-    const prices = [...new Set(rows.filter(r => r[0] && r[0].toLowerCase().trim() === category.toLowerCase().trim() && r[1] && r[1].toLowerCase().trim() === size.toLowerCase().trim()).map(r => r[2] ? r[2].trim() : ''))].filter(Boolean);
-    const listRows = prices.map(price => ({ id: `price${category}xx${size}xx${price}`, title: `Rs ${price}` }));
     try {
+        const rows = await getSheetData();
+        const prices = [...new Set(rows.filter(r => r[0] && r[0].toLowerCase().trim() === category.toLowerCase().trim() && r[1] && r[1].toLowerCase().trim() === size.toLowerCase().trim()).map(r => r[2] ? r[2].trim() : ''))].filter(Boolean);
+        const listRows = prices.map(price => ({ id: `price${category}xx${size}xx${price}`, title: `Rs ${price}` }));
         await axios.post(`https://graph.facebook.com/v17.0/${PHONENUMBERID}/messages`, { messaging_product: "whatsapp", to: to, type: "interactive", interactive: { type: "list", header: { type: "text", text: "Prices" }, body: { text: `Price select karein:` }, footer: { text: "Thrills" }, action: { button: "Prices", sections: [{ title: "Prices", rows: listRows }] } } }, { headers: { Authorization: `Bearer ${WHATSAPPTOKEN}` } });
         await saveMessageToSheet(to, 'Bot', 'text', `Prices menu bheja gaya for: ${category} (${size})`);
-    } catch (e) {}
+    } catch (e) {
+        await sendText(to, "Prices Send Error: " + e.message);
+    }
 }
 
 async function sendCheckoutMenu(to) {
     try {
         await axios.post(`https://graph.facebook.com/v17.0/${PHONENUMBERID}/messages`, { messaging_product: "whatsapp", to: to, type: "interactive", interactive: { type: "button", body: { text: "Kia aap mazeed items add karna chahtay hain ya checkout?" }, action: { buttons: [{ type: "reply", reply: { id: "addmore", title: "Add More" } }, { type: "reply", reply: { id: "checkout", title: "Checkout" } }] } } }, { headers: { Authorization: `Bearer ${WHATSAPPTOKEN}` } });
         await saveMessageToSheet(to, 'Bot', 'text', 'Checkout options bhejay gaye.');
-    } catch (e) {}
+    } catch (e) {
+        await sendText(to, "Checkout Menu Error: " + e.message);
+    }
 }
 
 async function sendVideo(to, url) {
