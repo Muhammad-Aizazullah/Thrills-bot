@@ -30,9 +30,9 @@ function logout() {
 }
 
 function switchTab(tabId, element) {
-    document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active-content'));
+    document.querySelectorAll('.tabContent').forEach(tab => tab.classList.remove('activeContent'));
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    document.getElementById(tabId).classList.add('active-content');
+    document.getElementById(tabId).classList.add('activeContent');
     element.classList.add('active');
 }
 
@@ -46,9 +46,9 @@ async function fetchOrders() {
 
 function filterOrders(status) {
     currentFilter = status;
-    document.querySelectorAll('.filter-btn').forEach(btn => {
-        btn.classList.remove('active-filter');
-        if(btn.innerText.includes(status)) btn.classList.add('active-filter');
+    document.querySelectorAll('.filterBtn').forEach(btn => {
+        btn.classList.remove('activeFilter');
+        if(btn.innerText.includes(status)) btn.classList.add('activeFilter');
     });
     renderOrders();
 }
@@ -132,7 +132,7 @@ function renderChatList() {
         if (searchVal && !phone.toLowerCase().includes(searchVal)) return;
 
         const div = document.createElement('div');
-        div.className = `chat-user-item ${activeChatPhone === phone ? 'active-chat' : ''}`;
+        div.className = `chatUserItem ${activeChatPhone === phone ? 'activeChat' : ''}`;
         div.innerHTML = `<strong>${phone}</strong> <br><small>${hasOrder ? 'Order Holder' : 'Visitor'}</small>`;
         div.onclick = () => { activeChatPhone = phone; renderChatWindow(phone); };
         listContainer.appendChild(div);
@@ -146,21 +146,20 @@ function renderChatWindow(phone) {
     const userMsgs = allChats.filter(m => m[0] === phone);
     userMsgs.forEach(m => {
         const div = document.createElement('div');
-        div.className = `message-bubble ${m[1].toLowerCase() === 'customer' ? 'msg-customer' : 'msg-bot'}`;
+        div.className = `messageBubble ${m[1].toLowerCase() === 'customer' ? 'msgCustomer' : 'msgBot'}`;
         
-        // Image tag replacement logic
         let contentHtml = `<p>${m[3]}</p>`;
         if (m[2] === 'image' && m[3].startsWith('http')) {
-            contentHtml = `<a href="${m[3]}" target="_blank"><img src="${m[3]}" class="chat-image" alt="Customer Image" /></a>`;
+            contentHtml = `<a href="${m[3]}" target="_blank"><img src="${m[3]}" class="chatImage" alt="Customer Image" /></a>`;
         }
 
-        div.innerHTML = `<strong>${m[1]}:</strong> ${contentHtml} <span class="time-stamp">${m[4]}</span>`;
+        div.innerHTML = `<strong>${m[1]}:</strong> ${contentHtml} <span class="timeStamp">${m[4]}</span>`;
         windowContainer.appendChild(div);
     });
 
     const isPaused = botStatuses[phone] === 'Paused';
     document.getElementById('botToggleBtn').innerText = isPaused ? "Resume Bot Auto-Reply" : "Pause Bot (Take Over Chat)";
-    document.getElementById('botToggleBtn').className = isPaused ? "btn-resume" : "btn-pause";
+    document.getElementById('botToggleBtn').className = isPaused ? "btnResume" : "btnPause";
     
     const linkedOrder = allOrders.find(o => o.phone === phone);
     const detailsContainer = document.getElementById('chatOrderSidebar');

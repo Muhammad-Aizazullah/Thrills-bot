@@ -3,81 +3,74 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Thrills - Premium Management Suite</title>
+    <title>Thrills Management</title>
     <meta name="robots" content="noindex, nofollow">
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; }
         body { background: #0f172a; color: #f8fafc; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
         #loginScreen { background: #1e293b; padding: 40px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); width: 100%; max-width: 400px; display: flex; flex-direction: column; gap: 20px; }
         #loginScreen h2 { text-align: center; color: #38bdf8; }
         #loginScreen input, #loginScreen button { width: 100%; padding: 12px; border-radius: 6px; border: none; font-size: 16px; }
         #loginScreen input { background: #334155; color: #fff; }
-        #loginScreen button, .btn-action { background: #0284c7; color: #fff; cursor: pointer; transition: 0.3s; font-weight: bold; }
-        #loginScreen button:hover, .btn-action:hover { background: #0369a1; }
+        #loginScreen button, .btnAction { background: #0284c7; color: #fff; cursor: pointer; transition: 0.3s; font-weight: bold; }
+        #loginScreen button:hover, .btnAction:hover { background: #0369a1; }
         
         #dashboard { display: none; width: 95vw; height: 90vh; background: #1e293b; border-radius: 12px; box-shadow: 0 15px 35px rgba(0,0,0,0.4); overflow: hidden; }
-        .nav-bar { background: #0f172a; padding: 15px 25px; display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #334155; }
-        .nav-tabs { display: flex; gap: 10px; }
-        .tab { padding: 10px 20px; background: #334155; border: none; color: #94a3b8; border-radius: 6px; cursor: pointer; transition: 0.3s; font-weight: 6px; }
+        .navBar { background: #0f172a; padding: 15px 25px; display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #334155; }
+        .navTabs { display: flex; gap: 10px; }
+        .tab { padding: 10px 20px; background: #334155; border: none; color: #94a3b8; border-radius: 6px; cursor: pointer; font-weight: bold; }
         .tab.active { background: #0284c7; color: #fff; }
-        .logout-btn { background: #ef4444; color: white; padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; }
+        .logoutBtn { background: #ef4444; color: white; padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; }
         
-        .tab-content { display: none; height: calc(100% - 70px); padding: 25px; overflow-y: auto; }
-        .tab-content.active-content { display: block; }
+        .tabContent { display: none; height: calc(100% - 70px); padding: 25px; overflow-y: auto; }
+        .tabContent.activeContent { display: block; }
         
-        .filter-container { display: flex; gap: 10px; margin-bottom: 20px; }
-        .filter-btn { padding: 8px 16px; background: #334155; color: #fff; border: none; border-radius: 6px; cursor: pointer; }
-        .filter-btn.active-filter { background: #38bdf8; color: #0f172a; font-weight: bold; }
+        .filterContainer { display: flex; gap: 10px; margin-bottom: 20px; }
+        .filterBtn { padding: 8px 16px; background: #334155; color: #fff; border: none; border-radius: 6px; cursor: pointer; }
+        .filterBtn.activeFilter { background: #38bdf8; color: #0f172a; font-weight: bold; }
         .orderCard { background: #0f172a; padding: 20px; border-radius: 8px; margin-bottom: 15px; border-left: 5px solid #38bdf8; display: flex; justify-content: space-between; align-items: center; }
         .orderDetails p { margin-top: 5px; color: #cbd5e1; }
         .orderActions { display: flex; flex-direction: column; gap: 10px; }
         .orderActions select { padding: 8px; border-radius: 6px; background: #334155; color: #fff; border: none; }
         
-        .product-form { display: flex; flex-direction: column; gap: 15px; max-width: 500px; }
-        .product-form input, .product-form select { width: 100%; padding: 12px; background: #334155; border: none; color: white; border-radius: 6px; }
+        .productForm { display: flex; flex-direction: column; gap: 15px; max-width: 500px; }
+        .productForm input, .productForm select { width: 100%; padding: 12px; background: #334155; border: none; color: white; border-radius: 6px; }
         
-        .chat-container { display: flex; height: 100%; border-radius: 8px; overflow: hidden; background: #0f172a; }
-        .chat-sidebar { width: 30%; background: #1e293b; border-right: 2px solid #334155; display: flex; flex-direction: column; }
-        .chat-search-box { padding: 10px; background: #0f172a; }
-        .chat-search-box input { width: 100%; padding: 10px; border-radius: 6px; background: #334155; border: none; color: white; }
-        .chat-list-scroll { flex: 1; overflow-y: auto; }
-        .chat-user-item { padding: 15px; border-bottom: 1px solid #334155; cursor: pointer; transition: 0.2s; }
-        .chat-user-item:hover, .active-chat { background: #334155; }
+        .chatContainer { display: flex; height: 100%; border-radius: 8px; overflow: hidden; background: #0f172a; }
+        .chatSidebar { width: 30%; background: #1e293b; border-right: 2px solid #334155; display: flex; flex-direction: column; }
+        .chatSearchBox { padding: 10px; background: #0f172a; }
+        .chatSearchBox input { width: 100%; padding: 10px; border-radius: 6px; background: #334155; border: none; color: white; }
+        .chatListScroll { flex: 1; overflow-y: auto; }
+        .chatUserItem { padding: 15px; border-bottom: 1px solid #334155; cursor: pointer; transition: 0.2s; }
+        .chatUserItem:hover, .activeChat { background: #334155; }
         
-        .chat-main-window { width: 50%; display: flex; flex-direction: column; background: #0f172a; position: relative; }
-        .chat-header { padding: 15px; background: #1e293b; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; }
-        .chat-messages { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+        .chatMainWindow { width: 50%; display: flex; flex-direction: column; background: #0f172a; position: relative; }
+        .chatHeader { padding: 15px; background: #1e293b; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; }
+        .chatMessages { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
         
-        /* Message Wrap Fixes (Issue #3) */
-        .message-bubble { 
+        /* CSS FIX: Yeh code slider khatam karay ga aur link neechay giraye ga */
+        .messageBubble { 
             max-width: 70%; 
             padding: 10px 14px; 
             border-radius: 8px; 
             font-size: 15px; 
             position: relative; 
             word-wrap: break-word; 
-            word-break: break-word; 
             overflow-wrap: break-word; 
-            white-space: pre-wrap; 
+            word-break: break-all; 
+            white-space: normal; 
         }
-        .chat-image {
-            width: 100%;
-            max-width: 250px;
-            border-radius: 6px;
-            margin-top: 5px;
-            cursor: pointer;
-            border: 2px solid #38bdf8;
-        }
-
-        .msg-customer { background: #334155; align-self: flex-start; color: white; }
-        .msg-bot { background: #0284c7; align-self: flex-end; color: white; }
-        .time-stamp { font-size: 10px; color: #94a3b8; display: block; text-align: right; margin-top: 4px; }
-        .chat-input-area { padding: 15px; background: #1e293b; display: flex; gap: 10px; border-top: 1px solid #334155; }
-        .chat-input-area input { flex: 1; padding: 12px; border-radius: 6px; border: none; background: #334155; color: white; }
         
-        .chat-info-sidebar { width: 20%; background: #1e293b; padding: 20px; border-left: 2px solid #334155; }
-        .btn-pause { background: #ef4444; color: white; padding: 8px; border: none; border-radius: 6px; cursor: pointer; }
-        .btn-resume { background: #22c55e; color: white; padding: 8px; border: none; border-radius: 6px; cursor: pointer; }
+        .chatImage { width: 100%; max-width: 250px; border-radius: 6px; margin-top: 5px; border: 2px solid #38bdf8; }
+        .msgCustomer { background: #334155; align-self: flex-start; color: white; }
+        .msgBot { background: #0284c7; align-self: flex-end; color: white; }
+        .timeStamp { font-size: 10px; color: #94a3b8; display: block; text-align: right; margin-top: 4px; }
+        .chatInputArea { padding: 15px; background: #1e293b; display: flex; gap: 10px; border-top: 1px solid #334155; }
+        .chatInputArea input { flex: 1; padding: 12px; border-radius: 6px; border: none; background: #334155; color: white; }
+        
+        .chatInfoSidebar { width: 20%; background: #1e293b; padding: 20px; border-left: 2px solid #334155; }
+        .btnPause { background: #ef4444; color: white; padding: 8px; border: none; border-radius: 6px; cursor: pointer; }
+        .btnResume { background: #22c55e; color: white; padding: 8px; border: none; border-radius: 6px; cursor: pointer; }
     </style>
 </head>
 <body>
@@ -89,41 +82,41 @@
     </div>
 
     <div id="dashboard">
-        <div class="nav-bar">
-            <div class="nav-tabs">
+        <div class="navBar">
+            <div class="navTabs">
                 <button class="tab active" onclick="switchTab('ordersTab', this)">Manage Orders</button>
                 <button class="tab" onclick="switchTab('productsTab', this)">Add New Product</button>
                 <button class="tab" onclick="switchTab('chatsTab', this)">Live Chats UI</button>
             </div>
-            <button class="logout-btn" onclick="logout()">Logout</button>
+            <button class="logoutBtn" onclick="logout()">Logout</button>
         </div>
 
-        <div id="ordersTab" class="tab-content active-content">
-            <div class="filter-container">
-                <button class="filter-btn active-filter" onclick="filterOrders('New')">New Orders</button>
-                <button class="filter-btn" onclick="filterOrders('Confirmed')">Confirmed</button>
-                <button class="filter-btn" onclick="filterOrders('Dispatched')">Dispatched</button>
-                <button class="filter-btn" onclick="filterOrders('Completed')">Completed</button>
+        <div id="ordersTab" class="tabContent activeContent">
+            <div class="filterContainer">
+                <button class="filterBtn activeFilter" onclick="filterOrders('New')">New Orders</button>
+                <button class="filterBtn" onclick="filterOrders('Confirmed')">Confirmed</button>
+                <button class="filterBtn" onclick="filterOrders('Dispatched')">Dispatched</button>
+                <button class="filterBtn" onclick="filterOrders('Completed')">Completed</button>
             </div>
             <div id="ordersContainer"></div>
         </div>
 
-        <div id="productsTab" class="tab-content">
-            <div class="product-form">
+        <div id="productsTab" class="tabContent">
+            <div class="productForm">
                 <h3>Upload New Item Sequence</h3>
                 <input type="text" id="itemName" placeholder="Product Category/Name (e.g., Shirt)">
                 <input type="text" id="itemSize" placeholder="Size (e.g., Small, Medium, Large)">
                 <input type="number" id="itemPrice" placeholder="Price (Rs)">
                 <input type="file" id="videoFile" accept="video/*">
-                <button class="btn-action" id="uploadBtn" onclick="uploadAndSaveProduct()">Launch Product Video</button>
+                <button class="btnAction" id="uploadBtn" onclick="uploadAndSaveProduct()">Launch Product Video</button>
                 <p id="uploadStatus"></p>
             </div>
         </div>
 
-        <div id="chatsTab" class="tab-content" style="height: calc(100% - 70px); padding: 0;">
-            <div class="chat-container">
-                <div class="chat-sidebar">
-                    <div class="chat-search-box">
+        <div id="chatsTab" class="tabContent" style="padding: 0;">
+            <div class="chatContainer">
+                <div class="chatSidebar">
+                    <div class="chatSearchBox">
                         <input type="text" id="chatSearch" placeholder="Search customer number..." oninput="renderChatList()">
                         <div style="display:flex; gap:5px; margin-top:5px;">
                             <button onclick="setChatFilter('all')" style="flex:1; font-size:11px; padding:3px;">All</button>
@@ -131,22 +124,22 @@
                             <button onclick="setChatFilter('notconfirmed')" style="flex:1; font-size:11px; padding:3px;">No Order</button>
                         </div>
                     </div>
-                    <div class="chat-list-scroll" id="chatListContainer"></div>
+                    <div class="chatListScroll" id="chatListContainer"></div>
                 </div>
 
-                <div class="chat-main-window">
-                    <div class="chat-header">
+                <div class="chatMainWindow">
+                    <div class="chatHeader">
                         <h4>Conversation View</h4>
-                        <button id="botToggleBtn" class="btn-pause" onclick="toggleBot()">Pause Bot</button>
+                        <button id="botToggleBtn" class="btnPause" onclick="toggleBot()">Pause Bot</button>
                     </div>
-                    <div class="chat-messages" id="chatWindowMessages"></div>
-                    <div class="chat-input-area">
+                    <div class="chatMessages" id="chatWindowMessages"></div>
+                    <div class="chatInputArea">
                         <input type="text" id="manualReplyInput" placeholder="Type manual response to send via WhatsApp...">
-                        <button class="btn-action" style="padding:0 20px;" onclick="sendManualReply()">Send</button>
+                        <button class="btnAction" style="padding:0 20px;" onclick="sendManualReply()">Send</button>
                     </div>
                 </div>
 
-                <div class="chat-info-sidebar" id="chatOrderSidebar">
+                <div class="chatInfoSidebar" id="chatOrderSidebar">
                     <h4>No Active Selection</h4>
                 </div>
             </div>
@@ -155,4 +148,4 @@
 
     <script src="script.js"></script>
 </body>
-</html>
+</html> 
