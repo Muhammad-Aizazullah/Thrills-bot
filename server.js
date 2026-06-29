@@ -99,72 +99,91 @@ app.get('/webhook', (req, res) => {
 });
 
 app.post('/webhook', async (req, res) => {
-    if (!req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0]) return res.sendStatus(200);
-    const message = req.body.entry[0].changes[0].value.messages[0];
-    const senderPhone = message.from;
-    const session = getSession(senderPhone);
+    try {
+        if (!req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0]) return res.sendStatus(200);
+        const message = req.body.entry[0].changes[0].value.messages[0];
+        const senderPhone = message.from;
+        const session = getSession(senderPhone);
 
-    if (message.type === 'image') {
-        if (session.step === 'awaitingSS') {
-            session.step = 'awaitingName';
-            await sendText(senderPhone, "SS mil gaya! Ab apna Full Name bhej dein:");
-        } else if (session.tempSelection) {
-            session.cart.push(session.tempSelection);
-            session.tempSelection = null;
-            await sendCheckoutMenu(senderPhone);
+        if (message.type === 'image') {
+            if (session.step === 'awaitingSS') {
+                session.step = 'awaitingName';
+                await sendText(senderPhone, "SS mil gaya! Ab apna Full Name bhej dein:");
+            } else if (session.tempSelection) {
+                session.cart.push(session.tempSelection);
+                session.tempSelection = null;
+                await sendCheckoutMenu(senderPhone);
+            }
+            return res.sendStatus(200);
         }
-        return res.sendStatus(200);
-    }
 
-    if (message.type === 'text') {
-        if (session.step === 'awaitingName') {
-            session.customerName = message.text.body;
-            session.step = 'awaitingAddress';
-            await sendText(senderPhone, "Name save ho gaya! Ab apna mukammal Address bhej dein:");
-        } else if (session.step === 'awaitingAddress') {
-            session.customerAddress = message.text.body;
-            let totalBill = session.cart.reduce((sum, item) => sum + parseInt(item.price), 0);
+        if (message.type === 'text') {
+            if (session.step === 'awaitingName') {
+                session.customerName = message.text.body;
+                session.step = 'awaitingAddress';
+                await sendText(senderPhone, "Name save ho gaya! Ab apna mukammal Address bhej dein:");
+            } else if (session.step === 'awaitingAddress') {
+                session.customerAddress = message.text.body;
+                let totalBill = session.cart.reduce((sum, item) => sum + parseInt(item.price), 0);
+                
+                const newOrder = {
+                    id: orderIdCounter++,
+                    phone: senderPhone,
+                    items: [...session.cart],
+                    total: totalBill,
+                    name: session.customerName,
+                    address: session.customerAddress,
+                    time: new Date().toLocaleString()
+                };
+                await saveOrderToSheet(newOrder);
+                await sendText(senderPhone, "Order confirm ho gaya ha! Shukriya.");
+                sessions[senderPhone] = { cart: [], tempSelection: null, step: 'start', customerDetails: '', customerName: '', customerAddress: '' };
+            } else {
+                await sendDynamicMainMenu(senderPhone);
+            }
+            return res.sendStatus(200);
+        }
+
+        if (message.type === 'interactive') {
+            const replyId = (message.interactive.list_reply || message.interactive.button_reply).id;
             
-            const newOrder = {
-                id: orderIdCounter++,
-                phone: senderPhone,
-                items: [...session.cart],
-                total: totalBill,
-                name: session.customerName,
-                address: session.customerAddress,
-                time: new Date().toLocaleString()
-            };
-            await saveOrderToSheet(newOrder);
-            await sendText(senderPhone, "Order confirm ho gaya ha! Shukriya.");
-            sessions[senderPhone] = { cart: [], tempSelection: null, step: 'start', customerDetails: '', customerName: '', customerAddress: '' };
-        } else {
-            await sendDynamicMainMenu(senderPhone);
-        }
-        return res.sendStatus(200);
-    }
-
-    if (message.type === 'interactive') {
-        const replyId = (message.interactive.list_reply || message.interactive.button_reply).id;
-        if (replyId.startsWith('cat')) await sendDynamicSizes(senderPhone, replyId.split('cat')[1]);
-        else if (replyId.startsWith('size')) {
-            const parts = replyId.split('size')[1].split('xx');
-            await sendDynamicPrices(senderPhone, parts[0], parts[1]);
-        }
-        else if (replyId.startsWith('price')) {
-            const parts = replyId.split('price')[1].split('xx');
-            const rows = await getSheetData();
-            const matchedRow = rows.find(r => r[0].trim() === parts[0] && r[1].trim() === parts[1] && r[2].trim() === parts[2]);
-            if (matchedRow) {
-                session.tempSelection = { item: matchedRow[0], size: matchedRow[1], price: matchedRow[2] };
-                await sendVideo(senderPhone, matchedRow[3]);
+            if (replyId.startsWith('cat')) {
+                await sendDynamicSizes(senderPhone, replyId.split('cat')[1]);
+            }
+            else if (replyId.startsWith('size')) {
+                const parts = replyId.split('size')[1].split('xx');
+                await sendDynamicPrices(senderPhone, parts[0], parts[1]);
+            }
+            else if (replyId.startsWith('price')) {
+                const parts = replyId.split('price')[1].split('xx');
+                const rows = await getSheetData();
+                
+                // Safe aur Case-Insensitive Matching ta k bot stuck na ho
+                const matchedRow = rows.find(r => 
+                    r[0] && r[0].toLowerCase().trim() === parts[0].toLowerCase().trim() && 
+                    r[1] && r[1].toLowerCase().trim() === parts[1].toLowerCase().trim() && 
+                    r[2] && r[2].toLowerCase().trim() === parts[2].toLowerCase().trim()
+                );
+                
+                if (matchedRow) {
+                    session.tempSelection = { item: matchedRow[0], size: matchedRow[1], price: matchedRow[2] };
+                    await sendVideo(senderPhone, matchedRow[3]);
+                } else {
+                    await sendText(senderPhone, "Maazrat, yeh item available nahi ha. Dubara koshish karein.");
+                    await sendDynamicMainMenu(senderPhone);
+                }
+            }
+            else if (replyId === 'checkout') {
+                let billText = "Total Bill: " + session.cart.reduce((sum, item) => sum + parseInt(item.price), 0) + "\n\nEasypaisa: 03123123123\n\nSS bhejein:";
+                session.step = 'awaitingSS';
+                await sendText(senderPhone, billText);
+            }
+            else if (replyId === 'addmore') {
+                await sendDynamicMainMenu(senderPhone);
             }
         }
-        else if (replyId === 'checkout') {
-            let billText = "Total Bill: " + session.cart.reduce((sum, item) => sum + parseInt(item.price), 0) + "\n\nEasypaisa: 03123123123\n\nSS bhejein:";
-            session.step = 'awaitingSS';
-            await sendText(senderPhone, billText);
-        }
-        else if (replyId === 'addmore') await sendDynamicMainMenu(senderPhone);
+    } catch (err) {
+        console.error("Webhook Internal Error:", err);
     }
     res.sendStatus(200);
 });
