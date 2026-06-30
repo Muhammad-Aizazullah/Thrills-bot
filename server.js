@@ -356,20 +356,34 @@ app.post('/webhook', async (req, res) => {
                     await sendText(senderPhone, "Video mein say jo item pasand aaye, us ka Screenshot (SS) nikal kar yahan bhejein ta k usay cart mein daala ja sakay.");
                 }
             }
+// ... (baki code pehlay wala he rehne dein, sirf checkout logic yahan change krain)
+
             else if (replyId === 'checkout') {
+                // UPDATE: Agar customer ne SS nahi bheja aur seedha Checkout dabaya,
+                // tou incomplete item ko cart mein add karne k bajaye remove/discard kar dein.
+                if (session.tempSelection) {
+                    session.tempSelection = null; // Incomplete item discard ho gayi
+                    await saveSessionData(session);
+                }
+
                 if (session.cart.length === 0) {
-                    await sendText(senderPhone, "Aap ka cart khali ha. Pehlay item select karein.");
+                    await sendText(senderPhone, "Aap ka cart khali ha. Pehlay koi item select karein.");
                     await sendDynamicMainMenu(senderPhone);
                     return res.sendStatus(200);
                 }
+                
                 let billText = "🛍️ *Aap Ka Total Bill* 🛍️\n\n";
                 let total = 0;
-                session.cart.forEach((c, index) => { billText += `Item ${index + 1}: ${c.item}\nSize: ${c.size}\nPrice: Rs ${c.price}\n\n`; total += parseInt(c.price || 0); });
+                session.cart.forEach((c, index) => { 
+                    billText += `Item ${index + 1}: ${c.item}\nSize: ${c.size}\nPrice: Rs ${c.price}\n\n`; 
+                    total += parseInt(c.price || 0); 
+                });
                 billText += `*Total Bill:* Rs ${total}\n\n💳 *Payment Details:*\nEasypaisa Account: 03123123123\n\nKindly is number par payment kar k **Screenshot** isi chat mein bhejein.`;
                 
                 session.step = 'awaitingSS';
                 await saveSessionData(session);
                 await sendText(senderPhone, billText);
+
             }
             else if (replyId === 'addmore') await sendDynamicMainMenu(senderPhone);
         }
