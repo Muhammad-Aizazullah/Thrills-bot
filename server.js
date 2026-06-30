@@ -86,6 +86,36 @@ async function saveSessionData(session) {
     await saveSessionToSheet(session);       
 }
 
+// History Recovery: Agar Vercel restart ho jaye tou last selection chat history say utha lay ga
+async function rebuildSessionFromHistory(phone) {
+    try {
+        const client = await auth.getClient();
+        const sheets = google.sheets({ version: 'v4', auth: client });
+        const msgRes = await sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEETID, range: 'Messages!A:E' });
+        const rows = msgRes.data.values || [];
+        
+        const selections = rows.filter(r => String(r[0]).trim() === String(phone).trim() && r[1] === 'Customer' && r[3] && r[3].includes('[Selected:'))
+                               .map(r => r[3].replace('[Selected:', '').replace(']', '').trim());
+        
+        if (selections.length > 0) {
+            let price = "", size = "", item = "";
+            for (let i = selections.length - 1; i >= 0; i--) {
+                let text = selections[i];
+                if (text.startsWith('Rs ') && !price) {
+                    price = text.replace('Rs ', '').trim();
+                } else if (text !== 'Checkout' && text !== 'Add More' && !size && price) {
+                    size = text;
+                } else if (text !== 'Checkout' && text !== 'Add More' && !item && size) {
+                    item = text;
+                    break;
+                }
+            }
+            if (price) return { item: item || 'Item', size: size || 'Standard', price: price };
+        }
+    } catch (e) { console.error("History Recovery Error:", e.message); }
+    return null;
+}
+
 async function processWhatsAppMedia(mediaId) {
     try {
         const res = await axios.get(`https://graph.facebook.com/v17.0/${mediaId}`, { headers: { Authorization: `Bearer ${WHATSAPPTOKEN}` } });
@@ -108,7 +138,6 @@ async function getSheetData() {
     } catch (error) { return []; }
 }
 
-// ISSUE 1 FIXED: insertDataOption: 'INSERT_ROWS' lagaya gaya ha
 async function saveMessageToSheet(phone, sender, type, body) {
     try {
         const client = await auth.getClient();
@@ -116,7 +145,7 @@ async function saveMessageToSheet(phone, sender, type, body) {
         await sheets.spreadsheets.values.append({
             spreadsheetId: SPREADSHEETID, range: 'Messages!A:E', 
             valueInputOption: 'USER_ENTERED',
-            insertDataOption: 'INSERT_ROWS', // Ye line overwrite issue khatam karay gi
+            insertDataOption: 'INSERT_ROWS',
             requestBody: { values: [[String(phone), sender, type, body, new Date().toLocaleString()]] }
         });
     } catch (e) { console.error("Message Save Issue:", e.message); }
@@ -251,18 +280,33 @@ app.post('/webhook', async (req, res) => {
         const currentBotStatus = await getBotStatus(senderPhone);
         if (currentBotStatus === 'Paused') return res.sendStatus(200);
 
+        // Jab Customer koi Screenshot/Image bhejay
         if (message.type === 'image') {
             if (session.step === 'awaitingSS') {
+                // Payment Screenshot
                 session.step = 'awaitingName';
                 await saveSessionData(session);
-                await sendText(senderPhone, "SS mil gaya! Ab kindly apna Full Name bhej dein:");
+                await sendText(senderPhone, "Payment ka SS mil gaya! Ab kindly apna Full Name bhej dein:");
             } else {
-                await sendText(senderPhone, "Tasveer mil gai ha, agar aap order karna chahtay hain tou pehlay menu say items select karein.");
-                await sendDynamicMainMenu(senderPhone);
+                // Item Selection Screenshot
+                if (!session.tempSelection) {
+                    session.tempSelection = await rebuildSessionFromHistory(senderPhone);
+                }
+                
+                if (session.tempSelection) {
+                    session.cart.push(session.tempSelection);
+                    session.tempSelection = null;
+                    await saveSessionData(session);
+                    await sendCheckoutMenu(senderPhone);
+                } else {
+                    await sendText(senderPhone, "Tasveer mil gai ha, agar aap order karna chahtay hain tou pehlay menu say items select karein.");
+                    await sendDynamicMainMenu(senderPhone);
+                }
             }
             return res.sendStatus(200);
         }
 
+        // Jab Customer koi Text bhejay (Name, Address ya Normal message)
         if (message.type === 'text') {
             if (session.step === 'awaitingName') {
                 session.customerName = message.text.body;
@@ -275,12 +319,13 @@ app.post('/webhook', async (req, res) => {
                 
                 const newOrder = { id: orderIdCounter++, phone: senderPhone, items: [...session.cart], total: totalBill, name: session.customerName, address: session.customerAddress, time: new Date().toLocaleString() };
                 await saveOrderToSheet(newOrder);
-                await sendText(senderPhone, "Aap ka order confirm ho gaya ha! Thrills Store say shopping karne ka shukriya.");
+                await sendText(senderPhone, "Aap ka order confirm ho gaya ha! Thrills Store say shopping karne ka bohat shukriya.");
                 
                 session.step = 'start';
                 session.cart = [];
                 session.customerName = '';
                 session.customerAddress = '';
+                session.tempSelection = null;
                 await saveSessionData(session);
             } else {
                 await sendDynamicMainMenu(senderPhone);
@@ -288,6 +333,7 @@ app.post('/webhook', async (req, res) => {
             return res.sendStatus(200);
         }
 
+        // Jab Customer Menu/Buttons say kuch select karay
         if (message.type === 'interactive') {
             const replyId = (message.interactive.list_reply || message.interactive.button_reply).id;
             if (replyId.startsWith('cat')) await sendDynamicSizes(senderPhone, replyId.split('cat')[1]);
@@ -295,17 +341,18 @@ app.post('/webhook', async (req, res) => {
                 const parts = replyId.split('size')[1].split('xx');
                 await sendDynamicPrices(senderPhone, parts[0], parts[1]);
             }
-            // ISSUE 2 FIXED: Item direct cart mein push ho raha ha yahan
             else if (replyId.startsWith('price')) {
                 const parts = replyId.split('price')[1].split('xx');
                 const rows = await getSheetData();
                 const matchedRow = rows.find(r => r[0] && r[0].toLowerCase().trim() === parts[0].toLowerCase().trim() && r[1] && r[1].toLowerCase().trim() === parts[1].toLowerCase().trim() && r[2] && r[2].toLowerCase().trim() === parts[2].toLowerCase().trim());
                 if (matchedRow) {
-                    session.cart.push({ item: matchedRow[0], size: matchedRow[1], price: matchedRow[2] });
+                    // Yahan Item Cart mein Turaant Add NAHI horaha. Sirf temp memory mein ha.
+                    session.tempSelection = { item: matchedRow[0], size: matchedRow[1], price: matchedRow[2] };
                     await saveSessionData(session);
                     
+                    // Video aur SS mangnay ka message
                     await sendVideo(senderPhone, matchedRow[3]);
-                    await sendCheckoutMenu(senderPhone); // Video k baad direct checkout menu
+                    await sendText(senderPhone, "Video mein say jo item pasand aaye, us ka Screenshot (SS) nikal kar yahan bhejein ta k usay cart mein daala ja sakay.");
                 }
             }
             else if (replyId === 'checkout') {
@@ -364,7 +411,7 @@ async function sendDynamicPrices(to, category, size) {
 
 async function sendCheckoutMenu(to) {
     try {
-        await axios.post(`https://graph.facebook.com/v17.0/${PHONENUMBERID}/messages`, { messaging_product: "whatsapp", to: to, type: "interactive", interactive: { type: "button", body: { text: "Kia aap mazeed items add karna chahtay hain ya checkout?" }, action: { buttons: [{ type: "reply", reply: { id: "addmore", title: "Add More" } }, { type: "reply", reply: { id: "checkout", title: "Checkout" } }] } } }, { headers: { Authorization: `Bearer ${WHATSAPPTOKEN}` } });
+        await axios.post(`https://graph.facebook.com/v17.0/${PHONENUMBERID}/messages`, { messaging_product: "whatsapp", to: to, type: "interactive", interactive: { type: "button", body: { text: "Tasveer mil gai ha, item cart mein add ho chuki ha. Kia aap mazeed items add karna chahtay hain ya checkout?" }, action: { buttons: [{ type: "reply", reply: { id: "addmore", title: "Add More" } }, { type: "reply", reply: { id: "checkout", title: "Checkout" } }] } } }, { headers: { Authorization: `Bearer ${WHATSAPPTOKEN}` } });
         await saveMessageToSheet(to, 'Bot', 'text', 'Checkout options bhejay gaye.');
     } catch (e) {}
 }
