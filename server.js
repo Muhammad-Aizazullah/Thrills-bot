@@ -27,7 +27,7 @@ async function getSessionFromSheet(phone) {
         const client = await auth.getClient();
         const sheets = google.sheets({ version: 'v4', auth: client });
         const response = await sheets.spreadsheets.values.get({
-            spreadsheetId: SPREADSHEETID, range: 'BotSessions!A2:E'
+            spreadsheetId: SPREADSHEETID, range: 'BotSessions!A2:F'
         });
         const rows = response.data.values || [];
         const row = rows.find(r => String(r[0]).trim() === String(phone).trim());
@@ -37,11 +37,12 @@ async function getSessionFromSheet(phone) {
                 step: row[1] || 'start',
                 cart: row[2] ? JSON.parse(row[2]) : [],
                 customerName: row[3] || '',
-                customerAddress: row[4] || ''
+                customerAddress: row[4] || '',
+                tempSelection: row[5] ? JSON.parse(row[5]) : null
             };
         }
     } catch (e) { console.error("Session Load Error:", e.message); }
-    return { phone, step: 'start', cart: [], customerName: '', customerAddress: '' };
+    return { phone, step: 'start', cart: [], customerName: '', customerAddress: '', tempSelection: null };
 }
 
 async function saveSessionToSheet(session) {
@@ -59,18 +60,19 @@ async function saveSessionToSheet(session) {
             session.step,
             JSON.stringify(session.cart),
             session.customerName || '',
-            session.customerAddress || ''
+            session.customerAddress || '',
+            session.tempSelection ? JSON.stringify(session.tempSelection) : ''
         ]];
 
         if (rowIndex > 1) {
             await sheets.spreadsheets.values.update({
-                spreadsheetId: SPREADSHEETID, range: `BotSessions!A${rowIndex}:E${rowIndex}`,
-                valueInputOption: 'USER_ENTERED', requestBody: { values }
+                spreadsheetId: SPREADSHEETID, range: `BotSessions!A${rowIndex}:F${rowIndex}`,
+                valueInputOption: 'RAW', requestBody: { values }
             });
         } else {
             await sheets.spreadsheets.values.append({
-                spreadsheetId: SPREADSHEETID, range: 'BotSessions!A:E',
-                valueInputOption: 'USER_ENTERED', requestBody: { values }
+                spreadsheetId: SPREADSHEETID, range: 'BotSessions!A:F',
+                valueInputOption: 'RAW', requestBody: { values }
             });
         }
     } catch (e) { console.error("Session Save Error:", e.message); }
@@ -86,7 +88,6 @@ async function saveSessionData(session) {
     await saveSessionToSheet(session);       
 }
 
-// History Recovery: Agar Vercel restart ho jaye tou last selection chat history say utha lay ga
 async function rebuildSessionFromHistory(phone) {
     try {
         const client = await auth.getClient();
@@ -280,15 +281,12 @@ app.post('/webhook', async (req, res) => {
         const currentBotStatus = await getBotStatus(senderPhone);
         if (currentBotStatus === 'Paused') return res.sendStatus(200);
 
-        // Jab Customer koi Screenshot/Image bhejay
         if (message.type === 'image') {
             if (session.step === 'awaitingSS') {
-                // Payment Screenshot
                 session.step = 'awaitingName';
                 await saveSessionData(session);
                 await sendText(senderPhone, "Payment ka SS mil gaya! Ab kindly apna Full Name bhej dein:");
             } else {
-                // Item Selection Screenshot
                 if (!session.tempSelection) {
                     session.tempSelection = await rebuildSessionFromHistory(senderPhone);
                 }
@@ -306,7 +304,6 @@ app.post('/webhook', async (req, res) => {
             return res.sendStatus(200);
         }
 
-        // Jab Customer koi Text bhejay (Name, Address ya Normal message)
         if (message.type === 'text') {
             if (session.step === 'awaitingName') {
                 session.customerName = message.text.body;
@@ -333,7 +330,6 @@ app.post('/webhook', async (req, res) => {
             return res.sendStatus(200);
         }
 
-        // Jab Customer Menu/Buttons say kuch select karay
         if (message.type === 'interactive') {
             const replyId = (message.interactive.list_reply || message.interactive.button_reply).id;
             if (replyId.startsWith('cat')) await sendDynamicSizes(senderPhone, replyId.split('cat')[1]);
@@ -346,11 +342,9 @@ app.post('/webhook', async (req, res) => {
                 const rows = await getSheetData();
                 const matchedRow = rows.find(r => r[0] && r[0].toLowerCase().trim() === parts[0].toLowerCase().trim() && r[1] && r[1].toLowerCase().trim() === parts[1].toLowerCase().trim() && r[2] && r[2].toLowerCase().trim() === parts[2].toLowerCase().trim());
                 if (matchedRow) {
-                    // Yahan Item Cart mein Turaant Add NAHI horaha. Sirf temp memory mein ha.
                     session.tempSelection = { item: matchedRow[0], size: matchedRow[1], price: matchedRow[2] };
                     await saveSessionData(session);
                     
-                    // Video aur SS mangnay ka message
                     await sendVideo(senderPhone, matchedRow[3]);
                     await sendText(senderPhone, "Video mein say jo item pasand aaye, us ka Screenshot (SS) nikal kar yahan bhejein ta k usay cart mein daala ja sakay.");
                 }
