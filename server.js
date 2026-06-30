@@ -19,6 +19,10 @@ const auth = new google.auth.GoogleAuth({
     scopes: ['https://www.googleapis.com/auth/spreadsheets'], 
 });
 
+// Dual Memory System (Vercel RAM + Google Sheets)
+const memorySessions = {}; 
+let orderIdCounter = 1001;
+
 async function getSessionFromSheet(phone) {
     try {
         const client = await auth.getClient();
@@ -27,7 +31,7 @@ async function getSessionFromSheet(phone) {
             spreadsheetId: SPREADSHEETID, range: 'BotSessions!A2:F'
         });
         const rows = response.data.values || [];
-        const row = rows.find(r => r[0] === phone);
+        const row = rows.find(r => String(r[0]).trim() === String(phone).trim());
         if (row) {
             return {
                 phone: row[0],
@@ -38,7 +42,7 @@ async function getSessionFromSheet(phone) {
                 tempSelection: row[5] ? JSON.parse(row[5]) : null
             };
         }
-    } catch (e) { console.error(e.message); }
+    } catch (e) { console.error("Sheet Session Load Error:", e.message); }
     return { phone, step: 'start', cart: [], customerName: '', customerAddress: '', tempSelection: null };
 }
 
@@ -50,7 +54,7 @@ async function saveSessionToSheet(session) {
             spreadsheetId: SPREADSHEETID, range: 'BotSessions!A2:A'
         });
         const rows = response.data.values || [];
-        const rowIndex = rows.findIndex(r => r[0] === session.phone) + 2;
+        const rowIndex = rows.findIndex(r => String(r[0]).trim() === String(session.phone).trim()) + 2;
         
         const values = [[
             session.phone,
@@ -64,32 +68,69 @@ async function saveSessionToSheet(session) {
         if (rowIndex > 1) {
             await sheets.spreadsheets.values.update({
                 spreadsheetId: SPREADSHEETID, range: `BotSessions!A${rowIndex}:F${rowIndex}`,
-                valueInputOption: 'USER_ENTERED', requestBody: { values }
+                valueInputOption: 'RAW', requestBody: { values }
             });
         } else {
             await sheets.spreadsheets.values.append({
                 spreadsheetId: SPREADSHEETID, range: 'BotSessions!A:F',
-                valueInputOption: 'USER_ENTERED', requestBody: { values }
+                valueInputOption: 'RAW', requestBody: { values }
             });
         }
-    } catch (e) { console.error(e.message); }
+    } catch (e) { console.error("Sheet Session Save Error:", e.message); }
+}
+
+// Master Session Handler
+async function getSessionData(phone) {
+    if (!memorySessions[phone]) {
+        memorySessions[phone] = await getSessionFromSheet(phone);
+    }
+    return memorySessions[phone];
+}
+
+async function saveSessionData(session) {
+    memorySessions[session.phone] = session; // Save in Vercel RAM
+    await saveSessionToSheet(session);       // Backup in Google Sheet
+}
+
+// Bulletproof History Recovery 
+async function rebuildSessionFromHistory(phone) {
+    try {
+        const client = await auth.getClient();
+        const sheets = google.sheets({ version: 'v4', auth: client });
+        const msgRes = await sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEETID, range: 'Messages!A:E' });
+        const rows = msgRes.data.values || [];
+        
+        const selections = rows.filter(r => String(r[0]).trim() === String(phone).trim() && r[1] === 'Customer' && r[3] && r[3].includes('[Selected:'))
+                               .map(r => r[3].replace('[Selected:', '').replace(']', '').trim());
+        
+        if (selections.length > 0) {
+            let price = "", size = "", item = "";
+            for (let i = selections.length - 1; i >= 0; i--) {
+                let text = selections[i];
+                if (text.startsWith('Rs ') && !price) {
+                    price = text.replace('Rs ', '').trim();
+                } else if (text !== 'Checkout' && text !== 'Add More' && !size && price) {
+                    size = text;
+                } else if (text !== 'Checkout' && text !== 'Add More' && !item && size) {
+                    item = text;
+                    break;
+                }
+            }
+            if (price) return { item: item || 'Recovered Item', size: size || 'Standard', price: price };
+        }
+    } catch (e) { console.error("History Recovery Error:", e.message); }
+    return null;
 }
 
 async function processWhatsAppMedia(mediaId) {
     try {
-        const res = await axios.get(`https://graph.facebook.com/v17.0/${mediaId}`, {
-            headers: { Authorization: `Bearer ${WHATSAPPTOKEN}` }
-        });
+        const res = await axios.get(`https://graph.facebook.com/v17.0/${mediaId}`, { headers: { Authorization: `Bearer ${WHATSAPPTOKEN}` } });
         const mediaUrl = res.data.url;
         const mimeType = res.data.mime_type || 'image/jpeg';
-        const mediaRes = await axios.get(mediaUrl, {
-            headers: { Authorization: `Bearer ${WHATSAPPTOKEN}` }, responseType: 'arraybuffer'
-        });
+        const mediaRes = await axios.get(mediaUrl, { headers: { Authorization: `Bearer ${WHATSAPPTOKEN}` }, responseType: 'arraybuffer' });
         const base64Str = Buffer.from(mediaRes.data, 'binary').toString('base64');
         const dataUri = `data:${mimeType};base64,${base64Str}`;
-        const cloudRes = await axios.post(`https://api.cloudinary.com/v1_1/dh4c49ca4/image/upload`, {
-            file: dataUri, upload_preset: 'Thrills'
-        });
+        const cloudRes = await axios.post(`https://api.cloudinary.com/v1_1/dh4c49ca4/image/upload`, { file: dataUri, upload_preset: 'Thrills' });
         return cloudRes.data.secure_url;
     } catch (e) { return null; }
 }
@@ -100,7 +141,7 @@ async function getSheetData() {
         const sheets = google.sheets({ version: 'v4', auth: client });
         const response = await sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEETID, range: 'Sheet1!A2:D' });
         return response.data.values || [];
-    } catch (error) { throw new Error("Sheet1 read fail ho rahi ha"); }
+    } catch (error) { return []; }
 }
 
 async function saveMessageToSheet(phone, sender, type, body) {
@@ -108,7 +149,7 @@ async function saveMessageToSheet(phone, sender, type, body) {
         const client = await auth.getClient();
         const sheets = google.sheets({ version: 'v4', auth: client });
         await sheets.spreadsheets.values.append({
-            spreadsheetId: SPREADSHEETID, range: 'Messages!A:E', valueInputOption: 'USER_ENTERED',
+            spreadsheetId: SPREADSHEETID, range: 'Messages!A:E', valueInputOption: 'RAW',
             requestBody: { values: [[phone, sender, type, body, new Date().toLocaleString()]] }
         });
     } catch (e) {}
@@ -120,7 +161,7 @@ async function getBotStatus(phone) {
         const sheets = google.sheets({ version: 'v4', auth: client });
         const response = await sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEETID, range: 'BotStatus!A2:B' });
         const rows = response.data.values || [];
-        const row = rows.find(r => r[0] === phone);
+        const row = rows.find(r => String(r[0]).trim() === String(phone).trim());
         return row ? row[1] : 'Active';
     } catch (e) { return 'Active'; }
 }
@@ -131,11 +172,11 @@ async function setBotStatus(phone, status) {
         const sheets = google.sheets({ version: 'v4', auth: client });
         const response = await sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEETID, range: 'BotStatus!A2:A' });
         const rows = response.data.values || [];
-        const rowIndex = rows.findIndex(r => r[0] === phone) + 2;
+        const rowIndex = rows.findIndex(r => String(r[0]).trim() === String(phone).trim()) + 2;
         if (rowIndex > 1) {
-            await sheets.spreadsheets.values.update({ spreadsheetId: SPREADSHEETID, range: `BotStatus!B${rowIndex}`, valueInputOption: 'USER_ENTERED', requestBody: { values: [[status]] } });
+            await sheets.spreadsheets.values.update({ spreadsheetId: SPREADSHEETID, range: `BotStatus!B${rowIndex}`, valueInputOption: 'RAW', requestBody: { values: [[status]] } });
         } else {
-            await sheets.spreadsheets.values.append({ spreadsheetId: SPREADSHEETID, range: 'BotStatus!A:B', valueInputOption: 'USER_ENTERED', requestBody: { values: [[phone, status]] } });
+            await sheets.spreadsheets.values.append({ spreadsheetId: SPREADSHEETID, range: 'BotStatus!A:B', valueInputOption: 'RAW', requestBody: { values: [[phone, status]] } });
         }
     } catch (e) {}
 }
@@ -146,7 +187,7 @@ async function saveOrderToSheet(order) {
         const sheets = google.sheets({ version: 'v4', auth: client });
         const itemsString = order.items.map(i => `${i.item}(${i.size})`).join(', ');
         await sheets.spreadsheets.values.append({
-            spreadsheetId: SPREADSHEETID, range: 'Orders!A:H', valueInputOption: 'USER_ENTERED',
+            spreadsheetId: SPREADSHEETID, range: 'Orders!A:H', valueInputOption: 'RAW',
             requestBody: { values: [[order.id, order.phone, itemsString, order.total, order.name, order.address, order.time, 'New']] }
         });
     } catch (error) {}
@@ -169,9 +210,9 @@ app.post('/api/orders/update', async (req, res) => {
         const sheets = google.sheets({ version: 'v4', auth: client });
         const response = await sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEETID, range: 'Orders!A2:A' });
         const rows = response.data.values || [];
-        const rowIndex = rows.findIndex(r => r[0] === id.toString()) + 2;
+        const rowIndex = rows.findIndex(r => String(r[0]).trim() === String(id).trim()) + 2;
         if (rowIndex > 1) {
-            await sheets.spreadsheets.values.update({ spreadsheetId: SPREADSHEETID, range: `Orders!H${rowIndex}`, valueInputOption: 'USER_ENTERED', requestBody: { values: [[status]] } });
+            await sheets.spreadsheets.values.update({ spreadsheetId: SPREADSHEETID, range: `Orders!H${rowIndex}`, valueInputOption: 'RAW', requestBody: { values: [[status]] } });
             res.json({ success: true });
         } else { res.status(404).json({ success: false }); }
     } catch (e) { res.status(500).json({ success: false }); }
@@ -207,7 +248,7 @@ app.post('/api/addproduct', async (req, res) => {
         const { name, size, price, videoUrl } = req.body;
         const client = await auth.getClient();
         const sheets = google.sheets({ version: 'v4', auth: client });
-        await sheets.spreadsheets.values.append({ spreadsheetId: SPREADSHEETID, range: 'Sheet1!A:D', valueInputOption: 'USER_ENTERED', requestBody: { values: [[name, size, price, videoUrl]] } });
+        await sheets.spreadsheets.values.append({ spreadsheetId: SPREADSHEETID, range: 'Sheet1!A:D', valueInputOption: 'RAW', requestBody: { values: [[name, size, price, videoUrl]] } });
         res.json({ success: true });
     } catch (error) { res.status(500).json({ success: false }); }
 });
@@ -222,7 +263,8 @@ app.post('/webhook', async (req, res) => {
         if (!req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0]) return res.sendStatus(200);
         const message = req.body.entry[0].changes[0].value.messages[0];
         
-        const session = await getSessionFromSheet(senderPhone);
+        // Session ko Fast Memory say nikala
+        const session = await getSessionData(senderPhone);
 
         let bodyText = "";
         if (message.type === 'text') { bodyText = message.text.body; } 
@@ -241,16 +283,22 @@ app.post('/webhook', async (req, res) => {
         if (message.type === 'image') {
             if (session.step === 'awaitingSS') {
                 session.step = 'awaitingName';
-                await saveSessionToSheet(session);
+                await saveSessionData(session);
                 await sendText(senderPhone, "SS mil gaya! Ab kindly apna Full Name bhej dein:");
-            } else if (session.tempSelection) {
-                session.cart.push(session.tempSelection);
-                session.tempSelection = null;
-                await saveSessionToSheet(session);
-                await sendCheckoutMenu(senderPhone);
             } else {
-                await sendText(senderPhone, "Kindly pehlay menu say price select karein phir screenshot bhejein.");
-                await sendDynamicMainMenu(senderPhone);
+                if (!session.tempSelection) {
+                    session.tempSelection = await rebuildSessionFromHistory(senderPhone);
+                }
+                
+                if (session.tempSelection) {
+                    session.cart.push(session.tempSelection);
+                    session.tempSelection = null;
+                    await saveSessionData(session);
+                    await sendCheckoutMenu(senderPhone);
+                } else {
+                    await sendText(senderPhone, "Bot item samajh nahi saka, kindly pehlay menu say price select karein phir screenshot bhejein.");
+                    await sendDynamicMainMenu(senderPhone);
+                }
             }
             return res.sendStatus(200);
         }
@@ -259,7 +307,7 @@ app.post('/webhook', async (req, res) => {
             if (session.step === 'awaitingName') {
                 session.customerName = message.text.body;
                 session.step = 'awaitingAddress';
-                await saveSessionToSheet(session);
+                await saveSessionData(session);
                 await sendText(senderPhone, "Name save ho gaya! Ab apna mukammal Address bhej dein:");
             } else if (session.step === 'awaitingAddress') {
                 session.customerAddress = message.text.body;
@@ -269,12 +317,13 @@ app.post('/webhook', async (req, res) => {
                 await saveOrderToSheet(newOrder);
                 await sendText(senderPhone, "Aap ka order confirm ho gaya ha! Thrills Store say shopping karne ka shukriya.");
                 
+                // Session ko bilkul clear kar diya order confirm honay k baad
                 session.step = 'start';
                 session.cart = [];
                 session.customerName = '';
                 session.customerAddress = '';
                 session.tempSelection = null;
-                await saveSessionToSheet(session);
+                await saveSessionData(session);
             } else {
                 await sendDynamicMainMenu(senderPhone);
             }
@@ -294,23 +343,28 @@ app.post('/webhook', async (req, res) => {
                 const matchedRow = rows.find(r => r[0] && r[0].toLowerCase().trim() === parts[0].toLowerCase().trim() && r[1] && r[1].toLowerCase().trim() === parts[1].toLowerCase().trim() && r[2] && r[2].toLowerCase().trim() === parts[2].toLowerCase().trim());
                 if (matchedRow) {
                     session.tempSelection = { item: matchedRow[0], size: matchedRow[1], price: matchedRow[2] };
-                    await saveSessionToSheet(session);
+                    await saveSessionData(session);
                     await sendVideo(senderPhone, matchedRow[3]);
                 }
             }
             else if (replyId === 'checkout') {
+                if (session.cart.length === 0) {
+                    await sendText(senderPhone, "Aap ka cart khali ha. Pehlay item select karein.");
+                    await sendDynamicMainMenu(senderPhone);
+                    return res.sendStatus(200);
+                }
                 let billText = "🛍️ *Aap Ka Total Bill* 🛍️\n\n";
                 let total = 0;
                 session.cart.forEach((c, index) => { billText += `Item${index + 1} name: ${c.item}\nItem${index + 1} Price: ${c.price}\n\n`; total += parseInt(c.price); });
                 billText += `*Total Bill:* ${total}\n\n💳 *Payment Details:*\nEasypaisa Account: 03123123123\n\nKindly is number par payment kar k **Screenshot** isi chat mein bhejein.`;
                 session.step = 'awaitingSS';
-                await saveSessionToSheet(session);
+                await saveSessionData(session);
                 await sendText(senderPhone, billText);
             }
             else if (replyId === 'addmore') await sendDynamicMainMenu(senderPhone);
         }
     } catch (err) { 
-        if(senderPhone) await sendText(senderPhone, "Critical Webhook Error: " + err.message); 
+        if(senderPhone) await sendText(senderPhone, "Web System Error: " + err.message); 
     }
     res.sendStatus(200);
 });
@@ -319,16 +373,11 @@ async function sendDynamicMainMenu(to) {
     try {
         const rows = await getSheetData();
         const categories = [...new Set(rows.map(r => r[0] ? r[0].trim() : ''))].filter(Boolean);
-        if (categories.length === 0) {
-            await sendText(to, "Error: Sheet1 khali ha ya categories nahi miliyan.");
-            return;
-        }
+        if (categories.length === 0) return;
         const listRows = categories.map(cat => ({ id: `cat${cat}`, title: cat }));
         await axios.post(`https://graph.facebook.com/v17.0/${PHONENUMBERID}/messages`, { messaging_product: "whatsapp", to: to, type: "interactive", interactive: { type: "list", header: { type: "text", text: "Thrills Store" }, body: { text: "Kia dekhna pasand karein gay?" }, footer: { text: "Menu" }, action: { button: "Categories", sections: [{ title: "Items", rows: listRows }] } } }, { headers: { Authorization: `Bearer ${WHATSAPPTOKEN}` } });
         await saveMessageToSheet(to, 'Bot', 'text', 'Menu bheja gaya: Main Categories');
-    } catch (e) {
-        await sendText(to, "Main Menu Error Check: " + e.message);
-    }
+    } catch (e) {}
 }
 
 async function sendDynamicSizes(to, category) {
@@ -338,9 +387,7 @@ async function sendDynamicSizes(to, category) {
         const listRows = sizes.map(size => ({ id: `size${category}xx${size}`, title: size }));
         await axios.post(`https://graph.facebook.com/v17.0/${PHONENUMBERID}/messages`, { messaging_product: "whatsapp", to: to, type: "interactive", interactive: { type: "list", header: { type: "text", text: "Sizes" }, body: { text: `Aap nay ${category} select kia ha. Size select karein:` }, footer: { text: "Thrills" }, action: { button: "Sizes", sections: [{ title: "Sizes", rows: listRows }] } } }, { headers: { Authorization: `Bearer ${WHATSAPPTOKEN}` } });
         await saveMessageToSheet(to, 'Bot', 'text', `Sizes menu bheja gaya for: ${category}`);
-    } catch (e) {
-        await sendText(to, "Sizes Send Error: " + e.message);
-    }
+    } catch (e) {}
 }
 
 async function sendDynamicPrices(to, category, size) {
@@ -350,18 +397,14 @@ async function sendDynamicPrices(to, category, size) {
         const listRows = prices.map(price => ({ id: `price${category}xx${size}xx${price}`, title: `Rs ${price}` }));
         await axios.post(`https://graph.facebook.com/v17.0/${PHONENUMBERID}/messages`, { messaging_product: "whatsapp", to: to, type: "interactive", interactive: { type: "list", header: { type: "text", text: "Prices" }, body: { text: `Price select karein:` }, footer: { text: "Thrills" }, action: { button: "Prices", sections: [{ title: "Prices", rows: listRows }] } } }, { headers: { Authorization: `Bearer ${WHATSAPPTOKEN}` } });
         await saveMessageToSheet(to, 'Bot', 'text', `Prices menu bheja gaya for: ${category} (${size})`);
-    } catch (e) {
-        await sendText(to, "Prices Send Error: " + e.message);
-    }
+    } catch (e) {}
 }
 
 async function sendCheckoutMenu(to) {
     try {
         await axios.post(`https://graph.facebook.com/v17.0/${PHONENUMBERID}/messages`, { messaging_product: "whatsapp", to: to, type: "interactive", interactive: { type: "button", body: { text: "Kia aap mazeed items add karna chahtay hain ya checkout?" }, action: { buttons: [{ type: "reply", reply: { id: "addmore", title: "Add More" } }, { type: "reply", reply: { id: "checkout", title: "Checkout" } }] } } }, { headers: { Authorization: `Bearer ${WHATSAPPTOKEN}` } });
         await saveMessageToSheet(to, 'Bot', 'text', 'Checkout options bhejay gaye.');
-    } catch (e) {
-        await sendText(to, "Checkout Menu Error: " + e.message);
-    }
+    } catch (e) {}
 }
 
 async function sendVideo(to, url) {
