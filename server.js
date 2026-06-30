@@ -19,7 +19,6 @@ const auth = new google.auth.GoogleAuth({
     scopes: ['https://www.googleapis.com/auth/spreadsheets'], 
 });
 
-// Dual Memory System (Vercel RAM + Google Sheets)
 const memorySessions = {}; 
 let orderIdCounter = 1001;
 
@@ -28,7 +27,7 @@ async function getSessionFromSheet(phone) {
         const client = await auth.getClient();
         const sheets = google.sheets({ version: 'v4', auth: client });
         const response = await sheets.spreadsheets.values.get({
-            spreadsheetId: SPREADSHEETID, range: 'BotSessions!A2:F'
+            spreadsheetId: SPREADSHEETID, range: 'BotSessions!A2:E'
         });
         const rows = response.data.values || [];
         const row = rows.find(r => String(r[0]).trim() === String(phone).trim());
@@ -38,12 +37,11 @@ async function getSessionFromSheet(phone) {
                 step: row[1] || 'start',
                 cart: row[2] ? JSON.parse(row[2]) : [],
                 customerName: row[3] || '',
-                customerAddress: row[4] || '',
-                tempSelection: row[5] ? JSON.parse(row[5]) : null
+                customerAddress: row[4] || ''
             };
         }
-    } catch (e) { console.error("Sheet Session Load Error:", e.message); }
-    return { phone, step: 'start', cart: [], customerName: '', customerAddress: '', tempSelection: null };
+    } catch (e) { console.error("Session Load Error:", e.message); }
+    return { phone, step: 'start', cart: [], customerName: '', customerAddress: '' };
 }
 
 async function saveSessionToSheet(session) {
@@ -61,65 +59,31 @@ async function saveSessionToSheet(session) {
             session.step,
             JSON.stringify(session.cart),
             session.customerName || '',
-            session.customerAddress || '',
-            session.tempSelection ? JSON.stringify(session.tempSelection) : ''
+            session.customerAddress || ''
         ]];
 
         if (rowIndex > 1) {
             await sheets.spreadsheets.values.update({
-                spreadsheetId: SPREADSHEETID, range: `BotSessions!A${rowIndex}:F${rowIndex}`,
-                valueInputOption: 'RAW', requestBody: { values }
+                spreadsheetId: SPREADSHEETID, range: `BotSessions!A${rowIndex}:E${rowIndex}`,
+                valueInputOption: 'USER_ENTERED', requestBody: { values }
             });
         } else {
             await sheets.spreadsheets.values.append({
-                spreadsheetId: SPREADSHEETID, range: 'BotSessions!A:F',
-                valueInputOption: 'RAW', requestBody: { values }
+                spreadsheetId: SPREADSHEETID, range: 'BotSessions!A:E',
+                valueInputOption: 'USER_ENTERED', requestBody: { values }
             });
         }
-    } catch (e) { console.error("Sheet Session Save Error:", e.message); }
+    } catch (e) { console.error("Session Save Error:", e.message); }
 }
 
-// Master Session Handler
 async function getSessionData(phone) {
-    if (!memorySessions[phone]) {
-        memorySessions[phone] = await getSessionFromSheet(phone);
-    }
+    if (!memorySessions[phone]) { memorySessions[phone] = await getSessionFromSheet(phone); }
     return memorySessions[phone];
 }
 
 async function saveSessionData(session) {
-    memorySessions[session.phone] = session; // Save in Vercel RAM
-    await saveSessionToSheet(session);       // Backup in Google Sheet
-}
-
-// Bulletproof History Recovery 
-async function rebuildSessionFromHistory(phone) {
-    try {
-        const client = await auth.getClient();
-        const sheets = google.sheets({ version: 'v4', auth: client });
-        const msgRes = await sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEETID, range: 'Messages!A:E' });
-        const rows = msgRes.data.values || [];
-        
-        const selections = rows.filter(r => String(r[0]).trim() === String(phone).trim() && r[1] === 'Customer' && r[3] && r[3].includes('[Selected:'))
-                               .map(r => r[3].replace('[Selected:', '').replace(']', '').trim());
-        
-        if (selections.length > 0) {
-            let price = "", size = "", item = "";
-            for (let i = selections.length - 1; i >= 0; i--) {
-                let text = selections[i];
-                if (text.startsWith('Rs ') && !price) {
-                    price = text.replace('Rs ', '').trim();
-                } else if (text !== 'Checkout' && text !== 'Add More' && !size && price) {
-                    size = text;
-                } else if (text !== 'Checkout' && text !== 'Add More' && !item && size) {
-                    item = text;
-                    break;
-                }
-            }
-            if (price) return { item: item || 'Recovered Item', size: size || 'Standard', price: price };
-        }
-    } catch (e) { console.error("History Recovery Error:", e.message); }
-    return null;
+    memorySessions[session.phone] = session; 
+    await saveSessionToSheet(session);       
 }
 
 async function processWhatsAppMedia(mediaId) {
@@ -144,15 +108,18 @@ async function getSheetData() {
     } catch (error) { return []; }
 }
 
+// ISSUE 1 FIXED: insertDataOption: 'INSERT_ROWS' lagaya gaya ha
 async function saveMessageToSheet(phone, sender, type, body) {
     try {
         const client = await auth.getClient();
         const sheets = google.sheets({ version: 'v4', auth: client });
         await sheets.spreadsheets.values.append({
-            spreadsheetId: SPREADSHEETID, range: 'Messages!A:E', valueInputOption: 'RAW',
-            requestBody: { values: [[phone, sender, type, body, new Date().toLocaleString()]] }
+            spreadsheetId: SPREADSHEETID, range: 'Messages!A:E', 
+            valueInputOption: 'USER_ENTERED',
+            insertDataOption: 'INSERT_ROWS', // Ye line overwrite issue khatam karay gi
+            requestBody: { values: [[String(phone), sender, type, body, new Date().toLocaleString()]] }
         });
-    } catch (e) {}
+    } catch (e) { console.error("Message Save Issue:", e.message); }
 }
 
 async function getBotStatus(phone) {
@@ -174,9 +141,9 @@ async function setBotStatus(phone, status) {
         const rows = response.data.values || [];
         const rowIndex = rows.findIndex(r => String(r[0]).trim() === String(phone).trim()) + 2;
         if (rowIndex > 1) {
-            await sheets.spreadsheets.values.update({ spreadsheetId: SPREADSHEETID, range: `BotStatus!B${rowIndex}`, valueInputOption: 'RAW', requestBody: { values: [[status]] } });
+            await sheets.spreadsheets.values.update({ spreadsheetId: SPREADSHEETID, range: `BotStatus!B${rowIndex}`, valueInputOption: 'USER_ENTERED', requestBody: { values: [[status]] } });
         } else {
-            await sheets.spreadsheets.values.append({ spreadsheetId: SPREADSHEETID, range: 'BotStatus!A:B', valueInputOption: 'RAW', requestBody: { values: [[phone, status]] } });
+            await sheets.spreadsheets.values.append({ spreadsheetId: SPREADSHEETID, range: 'BotStatus!A:B', valueInputOption: 'USER_ENTERED', requestBody: { values: [[phone, status]] } });
         }
     } catch (e) {}
 }
@@ -187,7 +154,9 @@ async function saveOrderToSheet(order) {
         const sheets = google.sheets({ version: 'v4', auth: client });
         const itemsString = order.items.map(i => `${i.item}(${i.size})`).join(', ');
         await sheets.spreadsheets.values.append({
-            spreadsheetId: SPREADSHEETID, range: 'Orders!A:H', valueInputOption: 'RAW',
+            spreadsheetId: SPREADSHEETID, range: 'Orders!A:H', 
+            valueInputOption: 'USER_ENTERED',
+            insertDataOption: 'INSERT_ROWS',
             requestBody: { values: [[order.id, order.phone, itemsString, order.total, order.name, order.address, order.time, 'New']] }
         });
     } catch (error) {}
@@ -212,7 +181,7 @@ app.post('/api/orders/update', async (req, res) => {
         const rows = response.data.values || [];
         const rowIndex = rows.findIndex(r => String(r[0]).trim() === String(id).trim()) + 2;
         if (rowIndex > 1) {
-            await sheets.spreadsheets.values.update({ spreadsheetId: SPREADSHEETID, range: `Orders!H${rowIndex}`, valueInputOption: 'RAW', requestBody: { values: [[status]] } });
+            await sheets.spreadsheets.values.update({ spreadsheetId: SPREADSHEETID, range: `Orders!H${rowIndex}`, valueInputOption: 'USER_ENTERED', requestBody: { values: [[status]] } });
             res.json({ success: true });
         } else { res.status(404).json({ success: false }); }
     } catch (e) { res.status(500).json({ success: false }); }
@@ -248,7 +217,7 @@ app.post('/api/addproduct', async (req, res) => {
         const { name, size, price, videoUrl } = req.body;
         const client = await auth.getClient();
         const sheets = google.sheets({ version: 'v4', auth: client });
-        await sheets.spreadsheets.values.append({ spreadsheetId: SPREADSHEETID, range: 'Sheet1!A:D', valueInputOption: 'RAW', requestBody: { values: [[name, size, price, videoUrl]] } });
+        await sheets.spreadsheets.values.append({ spreadsheetId: SPREADSHEETID, range: 'Sheet1!A:D', valueInputOption: 'USER_ENTERED', insertDataOption: 'INSERT_ROWS', requestBody: { values: [[name, size, price, videoUrl]] } });
         res.json({ success: true });
     } catch (error) { res.status(500).json({ success: false }); }
 });
@@ -263,7 +232,6 @@ app.post('/webhook', async (req, res) => {
         if (!req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0]) return res.sendStatus(200);
         const message = req.body.entry[0].changes[0].value.messages[0];
         
-        // Session ko Fast Memory say nikala
         const session = await getSessionData(senderPhone);
 
         let bodyText = "";
@@ -273,7 +241,10 @@ app.post('/webhook', async (req, res) => {
             const uploadedUrl = await processWhatsAppMedia(mediaId);
             bodyText = uploadedUrl ? uploadedUrl : "[Screenshot Received]";
         } 
-        else if (message.type === 'interactive') { bodyText = `[Selected: ${message.interactive.list_reply?.title || message.interactive.button_reply?.title}]`; }
+        else if (message.type === 'interactive') { 
+            const title = message.interactive.list_reply?.title || message.interactive.button_reply?.title || 'Option Selected';
+            bodyText = `[Selected: ${title}]`; 
+        }
 
         await saveMessageToSheet(senderPhone, 'Customer', message.type, bodyText);
 
@@ -286,19 +257,8 @@ app.post('/webhook', async (req, res) => {
                 await saveSessionData(session);
                 await sendText(senderPhone, "SS mil gaya! Ab kindly apna Full Name bhej dein:");
             } else {
-                if (!session.tempSelection) {
-                    session.tempSelection = await rebuildSessionFromHistory(senderPhone);
-                }
-                
-                if (session.tempSelection) {
-                    session.cart.push(session.tempSelection);
-                    session.tempSelection = null;
-                    await saveSessionData(session);
-                    await sendCheckoutMenu(senderPhone);
-                } else {
-                    await sendText(senderPhone, "Bot item samajh nahi saka, kindly pehlay menu say price select karein phir screenshot bhejein.");
-                    await sendDynamicMainMenu(senderPhone);
-                }
+                await sendText(senderPhone, "Tasveer mil gai ha, agar aap order karna chahtay hain tou pehlay menu say items select karein.");
+                await sendDynamicMainMenu(senderPhone);
             }
             return res.sendStatus(200);
         }
@@ -311,18 +271,16 @@ app.post('/webhook', async (req, res) => {
                 await sendText(senderPhone, "Name save ho gaya! Ab apna mukammal Address bhej dein:");
             } else if (session.step === 'awaitingAddress') {
                 session.customerAddress = message.text.body;
-                let totalBill = session.cart.reduce((sum, item) => sum + parseInt(item.price), 0);
+                let totalBill = session.cart.reduce((sum, item) => sum + parseInt(item.price || 0), 0);
                 
                 const newOrder = { id: orderIdCounter++, phone: senderPhone, items: [...session.cart], total: totalBill, name: session.customerName, address: session.customerAddress, time: new Date().toLocaleString() };
                 await saveOrderToSheet(newOrder);
                 await sendText(senderPhone, "Aap ka order confirm ho gaya ha! Thrills Store say shopping karne ka shukriya.");
                 
-                // Session ko bilkul clear kar diya order confirm honay k baad
                 session.step = 'start';
                 session.cart = [];
                 session.customerName = '';
                 session.customerAddress = '';
-                session.tempSelection = null;
                 await saveSessionData(session);
             } else {
                 await sendDynamicMainMenu(senderPhone);
@@ -337,14 +295,17 @@ app.post('/webhook', async (req, res) => {
                 const parts = replyId.split('size')[1].split('xx');
                 await sendDynamicPrices(senderPhone, parts[0], parts[1]);
             }
+            // ISSUE 2 FIXED: Item direct cart mein push ho raha ha yahan
             else if (replyId.startsWith('price')) {
                 const parts = replyId.split('price')[1].split('xx');
                 const rows = await getSheetData();
                 const matchedRow = rows.find(r => r[0] && r[0].toLowerCase().trim() === parts[0].toLowerCase().trim() && r[1] && r[1].toLowerCase().trim() === parts[1].toLowerCase().trim() && r[2] && r[2].toLowerCase().trim() === parts[2].toLowerCase().trim());
                 if (matchedRow) {
-                    session.tempSelection = { item: matchedRow[0], size: matchedRow[1], price: matchedRow[2] };
+                    session.cart.push({ item: matchedRow[0], size: matchedRow[1], price: matchedRow[2] });
                     await saveSessionData(session);
+                    
                     await sendVideo(senderPhone, matchedRow[3]);
+                    await sendCheckoutMenu(senderPhone); // Video k baad direct checkout menu
                 }
             }
             else if (replyId === 'checkout') {
@@ -355,8 +316,9 @@ app.post('/webhook', async (req, res) => {
                 }
                 let billText = "🛍️ *Aap Ka Total Bill* 🛍️\n\n";
                 let total = 0;
-                session.cart.forEach((c, index) => { billText += `Item${index + 1} name: ${c.item}\nItem${index + 1} Price: ${c.price}\n\n`; total += parseInt(c.price); });
-                billText += `*Total Bill:* ${total}\n\n💳 *Payment Details:*\nEasypaisa Account: 03123123123\n\nKindly is number par payment kar k **Screenshot** isi chat mein bhejein.`;
+                session.cart.forEach((c, index) => { billText += `Item ${index + 1}: ${c.item}\nSize: ${c.size}\nPrice: Rs ${c.price}\n\n`; total += parseInt(c.price || 0); });
+                billText += `*Total Bill:* Rs ${total}\n\n💳 *Payment Details:*\nEasypaisa Account: 03123123123\n\nKindly is number par payment kar k **Screenshot** isi chat mein bhejein.`;
+                
                 session.step = 'awaitingSS';
                 await saveSessionData(session);
                 await sendText(senderPhone, billText);
