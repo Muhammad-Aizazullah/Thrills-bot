@@ -22,6 +22,12 @@ const auth = new google.auth.GoogleAuth({
 const memorySessions = {}; 
 let orderIdCounter = 1001;
 
+// Yeh naya function kisi bhi tarah ki cart loading crash ko rokay ga
+function safeParse(str) {
+    if (!str || typeof str !== 'string' || str.trim() === '') return null;
+    try { return JSON.parse(str); } catch (e) { return null; }
+}
+
 async function getSessionFromSheet(phone) {
     try {
         const client = await auth.getClient();
@@ -32,13 +38,14 @@ async function getSessionFromSheet(phone) {
         const rows = response.data.values || [];
         const row = rows.find(r => String(r[0]).trim() === String(phone).trim());
         if (row) {
+            const parsedCart = safeParse(row[2]);
             return {
                 phone: row[0],
                 step: row[1] || 'start',
-                cart: row[2] ? JSON.parse(row[2]) : [],
+                cart: Array.isArray(parsedCart) ? parsedCart : [],
                 customerName: row[3] || '',
                 customerAddress: row[4] || '',
-                tempSelection: row[5] ? JSON.parse(row[5]) : null
+                tempSelection: safeParse(row[5])
             };
         }
     } catch (e) { console.error("Session Load Error:", e.message); }
